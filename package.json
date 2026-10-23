@@ -1,0 +1,57 @@
+{
+  "name": "codex-x-claude",
+  "version": "0.1.2",
+  "private": true,
+  "type": "module",
+  "description": "A little desktop workspace for two coding companions.",
+  "author": "Gonzolt",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "dev": "concurrently -k \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && electron . --dev\"",
+    "dev:web": "vite --host 127.0.0.1",
+    "build": "tsc --noEmit && vite build",
+    "start": "electron .",
+    "test": "node --test tests/*.test.cjs",
+    "dist": "npm run build && electron-builder --win portable",
+    "pack": "npm run build && electron-builder --dir"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "0.3.309",
+    "ajv": "^8.20.0",
+    "lucide-react": "1.61.0",
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "concurrently": "10.0.6",
+    "electron": "45.0.0",
+    "electron-builder": "26.15.3",
+    "typescript": "7.0.2",
+    "vite": "8.3.5",
+    "wait-on": "9.5.1"
+  },
+  "build": {
+    "appId": "com.gonzolt.codex-x-claude",
+    "productName": "Codex x Claude",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "build/icon.png",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "node_modules/@anthropic-ai/**/*"
+    ],
+    "win": {
+      "target": "portable",
+      "icon": "build/icon.ico",
+      "signExecutable": false
+    },
+    "artifactName": "Codex-x-Claude-${version}-Windows.${ext}"
+  }
+}
