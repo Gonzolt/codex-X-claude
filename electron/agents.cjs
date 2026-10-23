@@ -134,7 +134,7 @@ class CodexAgent {
     await this.connect();
     if (this.stopping) throw new Error('Stopped.');
     if (!this.thread || this.cwd !== cwd || this.readOnly !== readOnly) {
-      const result = await this.request('thread/start', { cwd, sandbox: readOnly ? 'readOnly' : 'workspaceWrite', approvalPolicy: 'on-request' });
+      const result = await this.request('thread/start', { cwd, sandbox: readOnly ? 'read-only' : 'workspace-write', approvalPolicy: 'on-request' });
       this.thread = result.thread.id; this.cwd = cwd; this.readOnly = readOnly;
     }
     if (this.stopping) throw new Error('Stopped.');

@@ -56,8 +56,8 @@ function registerHandlers() {
   handle('workspace:changes', () => changes(coordinator.state.project));
   handle('workspace:diff', name => fileDiff(coordinator.state.project, name));
   handle('workspace:appearance', value => {
-    if (!value || !['mint', 'lavender', 'peach'].includes(value.accent) || typeof value.pattern !== 'boolean' || ![13, 14, 15, 16].includes(value.fontSize)) throw new Error('Invalid appearance settings.');
-    coordinator.state.appearance = { accent: value.accent, pattern: value.pattern, fontSize: value.fontSize };
+    if (!value || !['mint', 'lavender', 'peach'].includes(value.accent) || !['light', 'dark'].includes(value.theme) || typeof value.pattern !== 'boolean' || ![13, 14, 15, 16].includes(value.fontSize)) throw new Error('Invalid appearance settings.');
+    coordinator.state.appearance = { accent: value.accent, theme: value.theme, pattern: value.pattern, fontSize: value.fontSize };
     coordinator.publish();
   });
   handle('agents:signin', async agent => {

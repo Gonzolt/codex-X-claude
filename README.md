@@ -29,7 +29,7 @@ Commands, tool calls, messages, and implementation/review handoffs appear in the
 
 ## Customize the interface
 
-**Make it yours** changes the accent, wallpaper, and message size. Settings and the recent activity display are saved locally.
+The **dark mode** button beside **open project** switches the whole interface between light and dark themes. Your selection is saved across app restarts. **Make it yours** changes the accent, wallpaper, and message size in either theme. Settings and the recent activity display are saved locally.
 
 - `src/main.tsx`: layout, panels, dialogs, and controls.
 - `src/styles.css`: colors, type, spacing, window chrome, and keycap styling.
@@ -82,8 +82,8 @@ npm test
 npm run build
 ```
 
-Controller and Git integration tests cover streaming message assembly, implementation/review handoffs, concurrent exploration, stop behavior, approvals, invalid input, and staged/unstaged/untracked file previews. Desktop smoke checks exercise the real Electron bridge, project picker, appearance persistence, changes dialog, and compact layout. The Codex app-server handshake and ChatGPT account detection were checked without sending a model prompt.
+Controller and Git integration tests cover streaming message assembly, implementation/review handoffs, concurrent exploration, stop behavior, approvals, invalid input, Codex sandbox wire values, and staged/unstaged/untracked file previews. Desktop smoke checks exercise the real Electron bridge, project picker, appearance persistence, changes dialog, and compact layout. Both native agent adapters were also checked with tiny read-only prompts using existing subscription sign-ins; both returned the expected response without calling tools.
 
-This first version has not yet completed a live Claude task or a live two-agent task: Claude Code must be installed and signed in on the machine to verify those paths. Provider versions may change their event/permission schemas. Unsupported Codex input requests return an explicit error rather than automatically granting access. Claude asks interactive questions in its response rather than opening a questionnaire dialog.
+Live Claude and Codex connection checks pass. A complete implementation followed by Claude review has not yet been exercised against a real coding task; that handoff is covered by controller tests. Provider versions may change their event/permission schemas. Unsupported Codex input requests return an explicit error rather than automatically granting access. Claude asks interactive questions in its response rather than opening a questionnaire dialog.
 
 The portable build is unsigned. No deployment, telemetry service, or cloud storage is configured by this application.

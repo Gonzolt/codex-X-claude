@@ -1,6 +1,6 @@
 export type Agent = 'codex' | 'claude';
 export type Status = 'idle' | 'working' | 'waiting' | 'approval' | 'done' | 'stopped' | 'error';
-export type Appearance = { accent: 'mint' | 'lavender' | 'peach'; pattern: boolean; fontSize: number };
+export type Appearance = { accent: 'mint' | 'lavender' | 'peach'; theme: 'light' | 'dark'; pattern: boolean; fontSize: number };
 export type Activity = { id: string; agent: Agent | 'you' | 'system'; text: string; kind: string; time: number; streaming?: boolean };
 export type Connection = { installed: boolean; signedIn: boolean; version?: string; path?: string | null };
 export type Approval = { id: string; agent: Agent; title: string; detail: string };

@@ -9,7 +9,7 @@ class Coordinator extends EventEmitter {
     this.state = {
       project: initial.project || null,
       events: Array.isArray(initial.events) ? initial.events.slice(-500) : [],
-      appearance: { accent: 'mint', pattern: true, fontSize: 14, ...(initial.appearance || {}) },
+      appearance: { accent: 'mint', theme: 'light', pattern: true, fontSize: 14, ...(initial.appearance || {}) },
       agents: { codex: { installed: false, signedIn: false }, claude: { installed: false, signedIn: false } },
       status: { codex: 'idle', claude: 'idle' }, busy: false, approvals: []
     };

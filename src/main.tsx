@@ -1,11 +1,12 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { ArrowRight, ArrowUpRight, Asterisk, Check, ChevronDown, CircleHelp, Code2, Columns2, Command, ExternalLink, FileCode2, FileDiff, Folder, FolderOpen, GitBranch, GitFork as Github, History, Link2, MessageSquare, Minus, Monitor, MoreHorizontal, Palette, Plus, RefreshCw, Settings2, ShieldCheck, Sparkles, Square, SquareTerminal, X } from 'lucide-react';
+import { ArrowRight, ArrowUpRight, Asterisk, Check, ChevronDown, CircleHelp, Code2, Columns2, Command, ExternalLink, FileCode2, FileDiff, Folder, FolderOpen, GitBranch, GitFork as Github, History, Link2, MessageSquare, Minus, Monitor, Moon, MoreHorizontal, Palette, Plus, RefreshCw, Settings2, ShieldCheck, Sparkles, Square, SquareTerminal, Sun, X } from 'lucide-react';
 import type { Activity, Agent, Appearance, Changes, Desktop, Result, Status, Workspace } from './types';
 import './styles.css';
+import './dark.css';
 
 const INITIAL: Workspace = {
-  project: null, events: [], appearance: { accent: 'mint', pattern: true, fontSize: 14 },
+  project: null, events: [], appearance: { accent: 'mint', theme: 'light', pattern: true, fontSize: 14 },
   agents: { codex: { installed: false, signedIn: false }, claude: { installed: false, signedIn: false } },
   status: { codex: 'idle', claude: 'idle' }, busy: false, approvals: []
 };
@@ -94,6 +95,7 @@ function App() {
   }, [invoke]);
   useEffect(() => { if (toast) { const id = setTimeout(() => setToast(''), 7000); return () => clearTimeout(id); } }, [toast]);
   useEffect(() => {
+    document.documentElement.dataset.theme = workspace.appearance.theme;
     document.documentElement.dataset.accent = workspace.appearance.accent;
     document.documentElement.dataset.pattern = String(workspace.appearance.pattern);
     document.documentElement.style.setProperty('--message-size', workspace.appearance.fontSize + 'px');
@@ -139,7 +141,7 @@ function App() {
         <div className="sidebar-bottom"><div className="connection-note"><div><span className={`tiny-dot ${connected ? 'green' : ''}`} /><span>{connected}/2 agents connected</span></div><button onClick={() => setModal('connections')}>manage connections<ArrowUpRight size={12} /></button></div><button className="nav-item" onClick={() => setModal('appearance')}><Palette size={16} />make it yours</button><button className="nav-item" onClick={() => setModal('connections')}><Settings2 size={16} />connections</button><div className="made-for-you"><Monitor size={12} />your machine. your rules.<span>♡</span></div></div>
       </aside>
       <main className="workspace-main">
-        <header className="workspace-heading"><div className="heading-crumb"><span className="tiny-dot green" />a place to make things</div><div className="headline-row"><div className="headline"><Keycaps text="codex" /><span className="headline-cross">×</span><Keycaps text="claude" /></div><button className="bevel-button open-project" disabled={workspace.busy} onClick={() => invoke(desktop.chooseProject())}><FolderOpen size={15} />{workspace.project ? 'switch project' : 'open project'}<ArrowUpRight size={13} /></button></div><div className="heading-subrow"><p>two minds. one workspace. whatever you’re imagining.</p><span className="version-badge">v0.1 <span>✧</span></span></div></header>
+        <header className="workspace-heading"><div className="heading-crumb"><span className="tiny-dot green" />a place to make things</div><div className="headline-row"><div className="headline"><Keycaps text="codex" /><span className="headline-cross">×</span><Keycaps text="claude" /></div><div className="heading-actions"><button className="bevel-button theme-toggle" aria-label="Dark mode" aria-pressed={workspace.appearance.theme === 'dark'} title={workspace.appearance.theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'} onClick={() => appearance({ theme: workspace.appearance.theme === 'dark' ? 'light' : 'dark' })}>{workspace.appearance.theme === 'dark' ? <Sun size={14} /> : <Moon size={14} />}<span>{workspace.appearance.theme === 'dark' ? 'light mode' : 'dark mode'}</span></button><button className="bevel-button open-project" disabled={workspace.busy} onClick={() => invoke(desktop.chooseProject())}><FolderOpen size={15} />{workspace.project ? 'switch project' : 'open project'}<ArrowUpRight size={13} /></button></div></div><div className="heading-subrow"><p>two minds. one workspace. whatever you’re imagining.</p><span className="version-badge">v0.1 <span>✧</span></span></div></header>
         {view === 'workspace' ? <>
           <div className="workspace-subbar"><div><Columns2 size={13} /><span>side by side</span><span className="subbar-separator">/</span><span className="muted">{workspace.project ? projectName(workspace.project) : 'a fresh start'}</span></div><button onClick={() => setModal('connections')}><Link2 size={13} />local accounts<ArrowUpRight size={12} /></button></div>
           <div className="agent-grid"><AgentPanel agent="codex" workspace={workspace} onConnect={() => setModal('connections')} onStop={() => invoke(desktop.stop('codex'))} /><div className="bridge-badge" title="Connected by your workspace"><Link2 size={15} /></div><AgentPanel agent="claude" workspace={workspace} onConnect={() => setModal('connections')} onStop={() => invoke(desktop.stop('claude'))} /></div>
