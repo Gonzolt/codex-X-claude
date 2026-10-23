@@ -5,7 +5,8 @@ const path = require('node:path');
 const { Coordinator } = require('./coordinator.cjs');
 const { changes, fileDiff } = require('./workspace.cjs');
 
-let win, coordinator, store, saveTimer, publishTimer;
+let win, coordinator, store, saveTimer, publishTimer, closing = false;
+let saveQueue = Promise.resolve();
 const dev = process.argv.includes('--dev');
 const headlessTest = process.argv.includes('--headless-test');
 if (headlessTest && process.env.CXC_TEST_USER_DATA) app.setPath('userData', process.env.CXC_TEST_USER_DATA);
@@ -15,11 +16,17 @@ const links = {
   claude: 'https://code.claude.com/docs/en/setup'
 };
 
-async function save() {
-  if (!coordinator || !store) return;
+function save() {
+  if (!coordinator || !store) return Promise.resolve();
   const { project, events, appearance } = coordinator.state;
   const value = JSON.stringify({ project, events: events.filter(e => e.kind !== 'output').map(e => ({ ...e, streaming: false })), appearance });
-  try { await fs.writeFile(store + '.tmp', value); await fs.rename(store + '.tmp', store); } catch (error) { console.error('Could not save workspace:', error.message); }
+  saveQueue = saveQueue.catch(() => {}).then(async () => {
+    try {
+      await fs.writeFile(store + '.tmp', value);
+      await fs.rename(store + '.tmp', store);
+    } catch (error) { console.error('Could not save workspace:', error.message); }
+  });
+  return saveQueue;
 }
 
 function registerHandlers() {
@@ -103,11 +110,14 @@ app.whenReady().then(async () => {
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.webContents.on('will-navigate', event => event.preventDefault());
   win.on('close', event => {
+    if (closing) return;
     if (coordinator.state.busy) {
       const choice = dialog.showMessageBoxSync(win, { type: 'question', buttons: ['Keep working', 'Stop and close'], defaultId: 0, cancelId: 0, message: 'An agent is still working.', detail: 'Closing this window stops the current task.' });
       if (choice === 0) { event.preventDefault(); return; }
     }
-    coordinator.close(); clearTimeout(saveTimer); save();
+    event.preventDefault(); closing = true;
+    coordinator.close(); clearTimeout(saveTimer); clearTimeout(publishTimer);
+    save().finally(() => { if (!win.isDestroyed()) win.destroy(); });
   });
   if (dev) await win.loadURL('http://127.0.0.1:5173'); else await win.loadFile(path.join(__dirname, '../dist/index.html'));
   coordinator.refresh().catch(error => coordinator.event('system', error.message, 'error'));
