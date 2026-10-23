@@ -18,8 +18,7 @@ const links = {
 
 function save() {
   if (!coordinator || !store) return Promise.resolve();
-  const { project, events, appearance } = coordinator.state;
-  const value = JSON.stringify({ project, events: events.filter(e => e.kind !== 'output').map(e => ({ ...e, streaming: false })), appearance });
+  const value = JSON.stringify(coordinator.serialize());
   saveQueue = saveQueue.catch(() => {}).then(async () => {
     try {
       await fs.writeFile(store + '.tmp', value);
@@ -46,12 +45,19 @@ function registerHandlers() {
     return coordinator.state.project;
   });
   handle('workspace:fresh', () => coordinator.fresh());
+  handle('workspace:chat', id => coordinator.selectChat(id));
+  handle('agents:approvalMode', mode => coordinator.setApprovalMode(mode));
   handle('agents:refresh', () => coordinator.refresh());
   handle('agents:start', task => coordinator.start(task));
   handle('agents:stop', agent => coordinator.stop(agent));
-  handle('agents:approve', (id, allow) => {
+  handle('agents:approve', (id, allow, content) => {
     if (typeof id !== 'string' || typeof allow !== 'boolean') throw new Error('Invalid approval.');
-    coordinator.answer(id, allow);
+    coordinator.answer(id, allow, content);
+  });
+  handle('agents:inputUrl', id => {
+    const item = coordinator.state.approvals.find(item => item.id === id && item.kind === 'url');
+    if (!item?.url || new URL(item.url).protocol !== 'https:') throw new Error('This request has no supported HTTPS link.');
+    return shell.openExternal(item.url);
   });
   handle('workspace:changes', () => changes(coordinator.state.project));
   handle('workspace:diff', name => fileDiff(coordinator.state.project, name));

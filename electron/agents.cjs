@@ -5,6 +5,8 @@ const { join } = require('node:path');
 const { homedir } = require('node:os');
 const { StringDecoder } = require('node:string_decoder');
 const { JsonLines, describeItem } = require('./protocol.cjs');
+const { questionSchema } = require('./inputs.cjs');
+const { LINES, activityKind } = require('./activity.cjs');
 const exec = promisify(execFile);
 
 async function findExecutable(name) {
@@ -44,6 +46,8 @@ class CodexAgent {
     this.pending = new Map(); this.sequence = 0; this.thread = null; this.turn = null;
     this.child = null; this.waiter = null; this.stopping = false;
   }
+  restoreSession(session) { this.savedSession = session; }
+  exportSession() { return this.thread ? { threadId: this.thread, cwd: this.cwd, readOnly: this.readOnly } : this.savedSession || null; }
   async connect() {
     if (this.child) return;
     const env = { ...process.env };
@@ -94,10 +98,22 @@ class CodexAgent {
     }
     const params = message.params || {};
     if (message.id !== undefined && message.method) {
+      const requestChild = this.child;
       try {
         if (['item/commandExecution/requestApproval', 'item/fileChange/requestApproval'].includes(message.method)) {
           const allow = !this.readOnly && await this.approval('codex', params.command || params.reason || 'Apply file changes', JSON.stringify(params, null, 2));
-          if (this.child) this.send({ id: message.id, result: { decision: allow ? 'accept' : 'decline' } });
+          if (this.child === requestChild && this.child) this.send({ id: message.id, result: { decision: allow ? 'accept' : 'decline' } });
+        } else if (message.method === 'mcpServer/elicitation/request') {
+          const result = await this.approval('codex', params.message || `A request from ${params.serverName}`, params.message || '', {
+            kind: params.mode === 'url' ? 'url' : 'form', schema: params.requestedSchema || { type: 'object', properties: {} },
+            ...(params.mode === 'url' ? { url: params.url } : {})
+          });
+          if (this.child === requestChild && this.child) this.send({ id: message.id, result });
+        } else if (['item/tool/requestUserInput', 'tool/requestUserInput'].includes(message.method)) {
+          const questions = params.questions || [];
+          const result = await this.approval('codex', 'A quick question', questions.map(q => q.question).join('\n'), { kind: 'form', schema: questionSchema(questions), autoEligible: false });
+          const answers = Object.fromEntries(questions.map((question, index) => [question.id, { answers: result.action === 'accept' ? [String(result.content[question.id || String(index)])] : [] }]));
+          if (this.child === requestChild && this.child) this.send({ id: message.id, result: { answers } });
         } else {
           // Unsupported elicitation is explicit, never an unattended permission grant.
           this.emit('system', `Codex requested ${message.method}. This request is not supported yet.`, 'notice');
@@ -113,6 +129,8 @@ class CodexAgent {
     }
     if (message.method === 'item/agentMessage/delta') this.emit('codex', params.delta, 'delta', params.itemId);
     if (message.method === 'item/started') {
+      const kind = activityKind(params.item.type, params.item);
+      this.emit('codex', LINES[kind], kind);
       const detail = describeItem(params.item);
       if (detail) this.emit('codex', detail, 'tool', params.item.id);
     }
@@ -122,7 +140,7 @@ class CodexAgent {
     }
     if (message.method === 'item/commandExecution/outputDelta') this.emit('codex', params.delta, 'output', params.itemId);
     if (message.method === 'turn/diff/updated') this.emit('codex', 'File changes updated', 'change');
-    if (message.method === 'error') this.emit('codex', params.error?.message || 'Codex reported an error', 'error');
+    if (message.method === 'error') this.emit('codex', params.error?.message || 'Codex reported an error', params.willRetry ? 'notice' : 'error');
     if (message.method === 'turn/completed' && this.waiter) {
       const waiter = this.waiter; this.waiter = null; this.turn = null;
       if (params.turn.status === 'completed') waiter.resolve(this.answer || 'Task completed.');
@@ -134,8 +152,10 @@ class CodexAgent {
     await this.connect();
     if (this.stopping) throw new Error('Stopped.');
     if (!this.thread || this.cwd !== cwd || this.readOnly !== readOnly) {
-      const result = await this.request('thread/start', { cwd, sandbox: readOnly ? 'read-only' : 'workspace-write', approvalPolicy: 'on-request' });
+      const resume = this.savedSession?.cwd === cwd ? this.savedSession : null;
+      const result = await this.request(resume ? 'thread/resume' : 'thread/start', { ...(resume ? { threadId: resume.threadId } : {}), cwd, sandbox: readOnly ? 'read-only' : 'workspace-write', approvalPolicy: 'on-request' });
       this.thread = result.thread.id; this.cwd = cwd; this.readOnly = readOnly;
+      this.savedSession = this.exportSession();
     }
     if (this.stopping) throw new Error('Stopped.');
     this.answer = '';
@@ -166,14 +186,16 @@ class CodexAgent {
 }
 
 class ClaudeAgent {
-  constructor(path, emit, approval) { this.path = path; this.emit = emit; this.approval = approval; this.session = null; this.query = null; }
-  async run(prompt, cwd, readOnly) {
+  constructor(path, emit, approval, dependencies = {}) { this.path = path; this.emit = emit; this.approval = approval; this.session = null; this.query = null; this.dependencies = dependencies; }
+  restoreSession(session) { if (session) { this.session = session.sessionId; this.cwd = session.cwd; this.readOnly = session.readOnly; } }
+  exportSession() { return this.session ? { sessionId: this.session, cwd: this.cwd, readOnly: this.readOnly } : null; }
+  async run(prompt, cwd, readOnly, runOptions = {}) {
     this.controller = new AbortController();
-    const { query } = await import('@anthropic-ai/claude-agent-sdk');
+    const query = this.dependencies.query || (await import('@anthropic-ai/claude-agent-sdk')).query;
     if (this.controller.signal.aborted) throw new Error('Stopped.');
-    if (this.cwd !== cwd || this.readOnly !== readOnly) this.session = null;
+    if (this.cwd !== cwd) this.session = null;
     this.cwd = cwd; this.readOnly = readOnly;
-    let answer = '', streamed = '', activeMessage = '';
+    let answer = '', streamed = '', activeMessage = '', sawResult = false, review;
     const env = { ...process.env };
     // This app deliberately uses the CLI's subscription login, not API billing.
     delete env.ANTHROPIC_API_KEY; delete env.ANTHROPIC_AUTH_TOKEN;
@@ -182,11 +204,21 @@ class ClaudeAgent {
       abortController: this.controller, includePartialMessages: true,
       ...(this.session ? { resume: this.session } : {}),
       permissionMode: 'default', settingSources: [],
-      allowedTools: ['Read', 'Glob', 'Grep'],
+      ...(runOptions.review ? { outputFormat: { type: 'json_schema', schema: {
+        type: 'object', additionalProperties: false,
+        properties: { needsChanges: { type: 'boolean' }, summary: { type: 'string' }, findings: { type: 'array', items: { type: 'string' } } },
+        required: ['needsChanges', 'summary', 'findings']
+      } } } : {}),
+      allowedTools: ['Read', 'Glob', 'Grep', 'WebSearch', 'WebFetch'],
       ...(readOnly ? { disallowedTools: ['Bash', 'Write', 'Edit', 'NotebookEdit', 'Agent', 'Task'] } : {}),
       canUseTool: async (tool, input, options) => {
-        if (tool === 'AskUserQuestion') return { behavior: 'deny', message: 'Ask the user in your response instead.' };
-        if (readOnly) return { behavior: 'deny', message: 'This task is read-only. Use Read, Glob, and Grep.' };
+        if (tool === 'AskUserQuestion') {
+          const questions = input.questions || [];
+          const result = await this.approval('claude', 'A quick question', questions.map(q => q.question).join('\n'), { kind: 'form', schema: questionSchema(questions), autoEligible: false });
+          if (result.action !== 'accept') return { behavior: 'deny', message: 'The user declined to answer.' };
+          return { behavior: 'allow', updatedInput: { ...input, answers: Object.fromEntries(questions.map((question, index) => [question.question, result.content[question.id || String(index)]])) } };
+        }
+        if (readOnly) return { behavior: 'deny', message: 'This task is read-only. Use reading and search tools.' };
         if (options.signal.aborted) return { behavior: 'deny', message: 'Stopped.' };
         const allow = await this.approval('claude', tool, JSON.stringify(input, null, 2));
         return allow ? { behavior: 'allow', updatedInput: input } : { behavior: 'deny', message: 'The user declined this action.' };
@@ -197,6 +229,11 @@ class ClaudeAgent {
         if (message.session_id) this.session = message.session_id;
         if (message.type === 'stream_event') {
           const event = message.event;
+          if (event.type === 'content_block_start') {
+            const block = event.content_block;
+            const kind = activityKind(block.type === 'tool_use' ? block.name : block.type);
+            if (block.type === 'thinking' || block.type === 'tool_use') this.emit('claude', LINES[kind], kind);
+          }
           if (event.type === 'message_start') { activeMessage = event.message.id; streamed = ''; }
           if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
             streamed += event.delta.text;
@@ -207,16 +244,23 @@ class ClaudeAgent {
           const text = message.message.content.filter(c => c.type === 'text').map(c => c.text).join('\n');
           if (text) { answer = text; this.emit('claude', text, 'message', message.message.id || activeMessage); }
           for (const block of message.message.content) if (block.type === 'tool_use') {
+            const kind = activityKind(block.name); this.emit('claude', LINES[kind], kind);
             this.emit('claude', `${block.name}: ${JSON.stringify(block.input)}`, 'tool', block.id);
           }
         }
         if (message.type === 'result') {
-          if (message.is_error || message.subtype !== 'success') throw new Error((message.errors || []).join('\n') || 'Claude could not finish the task. Check its sign-in and usage limits.');
+          sawResult = true;
+          if (message.is_error || message.subtype !== 'success') throw new Error((message.errors || []).join('\n') || message.result || 'Claude could not finish the task. Check its sign-in and usage limits.');
           answer = message.result || answer || streamed;
+          review = message.structured_output;
+          if (runOptions.review && review) this.emit('claude', [review.summary, ...(review.findings || []).map(finding => `• ${finding}`)].join('\n'), 'message', `review-${message.uuid || Date.now()}`);
+          // Result marks the completed turn. Background SDK messages may follow forever.
+          break;
         }
       }
-      return answer || 'Task completed.';
-    } finally { this.query = null; }
+      if (!sawResult) throw new Error('Claude disconnected before reporting a completed turn. Retry the task to resume its saved session.');
+      return runOptions.review ? { text: answer, review } : answer || 'Task completed.';
+    } finally { this.query?.close?.(); this.query = null; }
   }
   async stop() { this.controller?.abort(); }
   close() { this.controller?.abort(); this.query?.close?.(); }

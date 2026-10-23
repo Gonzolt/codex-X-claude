@@ -18,7 +18,7 @@ An account must include access to its coding agent. Browser access to a free cha
 
 | Selection | Behavior |
 | --- | --- |
-| Both · build + review | Codex implements the request, then the controller sends its summary and the original task to Claude for a read-only review of the actual files. |
+| Both · build + review | Codex implements, then Claude reviews the actual files. Actionable findings return to Codex for repair, with a maximum of three review passes. |
 | Both · explore in parallel | Both agents investigate at the same time without editing files. Their output streams into separate panels. |
 | Codex or Claude · build | Only the selected agent works on the task. |
 | Codex or Claude · read-only explore | The selected agent investigates without editing files. |
@@ -26,6 +26,14 @@ An account must include access to its coding agent. Browser access to a free cha
 The first version uses one writer at a time. Parallel exploration and Claude's review have read-only restrictions; this version does not merge simultaneous implementations or create Git worktrees. The handoff is managed by application code, rather than unrestricted agent-to-agent chat.
 
 Commands, tool calls, messages, and implementation/review handoffs appear in the activity view. File changes can be inspected in **changes**, including staged, unstaged, deleted, renamed, and new files. Each agent has a stop control; **stop working** stops both.
+
+Small live status lines describe thinking, reading, researching, editing, using tools, and writing with a little personality. They follow actual protocol/tool events; they do not expose private reasoning or invent research activity while waiting. A waiting reviewer gets a handoff status.
+
+## Saved chats
+
+Use **new chat** for a different subject. The previous chat stays in the **saved chats** sidebar, titled from its first task. Select an older chat to restore its project, messages, and each agent's native session. Chats save automatically on this computer and survive app restarts. Each chat keeps up to 500 recent events; the native agents manage their full session history. Switching collaboration modes in the same project retains agent context.
+
+Chat switching and starting a new subject are disabled during a running task. When work is idle, the composer shows a **start a new chat** shortcut. Unsent drafts stay with their chat while the app remains open. Old activity from version 0.1.1 is migrated into a saved chat; native session IDs cannot be recovered retroactively for that old activity.
 
 ## Customize the interface
 
@@ -67,13 +75,13 @@ The executable is written to `release/`. `npm run pack` creates an unpacked desk
 
 ## Permissions and local data
 
-Electron runs with context isolation and renderer sandboxing. The renderer cannot execute arbitrary commands. Native processes are launched without a shell; only the explicit sign-in action opens a PowerShell terminal. External links are restricted to the repository and official setup guides.
+Electron runs with context isolation and renderer sandboxing. The renderer cannot execute arbitrary commands. Native processes are launched without a shell; only the explicit sign-in action opens a PowerShell terminal. External links are restricted to the repository, official setup guides, and an explicitly requested pending HTTPS authorization page.
 
-Codex uses its workspace-write sandbox for build tasks and its read-only sandbox for exploration. Its supported command/file approval requests appear in the app. Claude uses the SDK's normal permission mode, with tool requests routed to the app; the app does not load project or user hooks/settings into Claude's SDK session. Read-only Claude tasks are limited to reading and searching. These are agent permission boundaries, not a separate OS sandbox for all of Claude's execution.
+Codex uses its workspace-write sandbox for build tasks and its read-only sandbox for exploration. Its command/file approval requests appear in the app. Claude uses the SDK's normal permission mode, with tool requests routed to the app; the app does not load project or user hooks/settings into Claude's SDK session. Read-only Claude tasks are limited to reading and searching, including web research. These are agent permission boundaries, not a separate OS sandbox for all of Claude's execution.
 
-Recent activity can contain source code, prompts, and command output. The app stores up to 500 recent events and appearance preferences in Electron's local user-data directory (`%APPDATA%/codex-x-claude/workspace.json` in this version). It does not store API keys or authentication tokens there. Full command-output events are not persisted. The agent tools manage their own credentials and session files.
+The **auto-approve** toggle approves tool commands, edits, and simple consent forms for this chat until you switch chats or restart the app. It starts off, does not turn off read-only restrictions, and does not answer actual questions or complete browser sign-ins. Pending permissions also offer **allow for this chat**. **Stop** remains available. Codex MCP input forms and both agents' supported question requests can be answered in the app, with schema validation.
 
-Conversation context is retained for each agent during the current desktop session. Reopening the application restores the activity display; it starts fresh agent conversations. Switching folders or selecting **new session** also starts fresh conversations.
+Chat activity can contain source code and prompts. The app stores chats, native session identifiers, project paths, and appearance preferences in Electron's local user-data directory (`%APPDATA%/codex-x-claude/workspace.json`). It does not store API keys or authentication tokens there. Full command-output events are not persisted. The agent tools manage their own credentials and session files; resuming requires those native session files to remain available.
 
 ## Verification and current limits
 
@@ -82,8 +90,8 @@ npm test
 npm run build
 ```
 
-Controller and Git integration tests cover streaming message assembly, implementation/review handoffs, concurrent exploration, stop behavior, approvals, invalid input, Codex sandbox wire values, and staged/unstaged/untracked file previews. Desktop smoke checks exercise the real Electron bridge, project picker, appearance persistence, changes dialog, and compact layout. Both native agent adapters were also checked with tiny read-only prompts using existing subscription sign-ins; both returned the expected response without calling tools.
+27 automated tests cover history migration and persistence, saved native session restoration across modes, chat switching protection, activity classification, auto-approval versus actual questions, MCP inputs, bounded review/repair, Claude completion/disconnection, streaming, stop controls, Codex sandbox values, and Git previews. Isolated Electron UI checks exercise saved chats and drafts, live statuses, permission and question dialogs, restart persistence, dark/light themes, and compact layout. Earlier native connection checks confirmed both agents respond using subscription sign-ins.
 
-Live Claude and Codex connection checks pass. A complete implementation followed by Claude review has not yet been exercised against a real coding task; that handoff is covered by controller tests. Provider versions may change their event/permission schemas. Unsupported Codex input requests return an explicit error rather than automatically granting access. Claude asks interactive questions in its response rather than opening a questionnaire dialog.
+A complete repair/review loop and cross-restart model continuation have not yet been exercised with live model calls in this version; those paths are covered by protocol and controller tests. Provider versions may change their event/permission schemas. Unsupported Codex request types return an explicit error. Claude turns finish on the SDK result event instead of waiting indefinitely for subsequent background messages.
 
 The portable build is unsigned. No deployment, telemetry service, or cloud storage is configured by this application.
