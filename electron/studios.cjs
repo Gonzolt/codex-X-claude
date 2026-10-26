@@ -10,6 +10,16 @@ const emptyJob = () => ({ status: 'idle', stage: 'Ready when you are.', logs: []
 const inside = (root, candidate) => { const relative = path.relative(root, candidate); return relative !== '..' && !relative.startsWith('..' + path.sep) && !path.isAbsolute(relative); };
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.woff2': 'font/woff2', '.woff': 'font/woff', '.png': 'image/png', '.jpg': 'image/jpeg', '.svg': 'image/svg+xml', '.wav': 'audio/wav', '.mp3': 'audio/mpeg', '.m4a': 'audio/mp4', '.mp4': 'video/mp4', '.json': 'application/json' };
 
+async function discoverFilms(root) {
+  const films = [], brands = await fs.readdir(path.join(root, 'brands'), { withFileTypes: true });
+  for (const brand of brands) if (brand.isDirectory() && /^[\w-]+$/.test(brand.name)) {
+    let entries = [];
+    try { entries = await fs.readdir(path.join(root, 'brands', brand.name, 'films')); } catch {}
+    for (const file of entries) if (/^[\w-]+\.html$/.test(file)) films.push({ id: `${brand.name}/${file.slice(0, -5)}`, name: file.slice(0, -5), brand: brand.name });
+  }
+  return films.sort((a, b) => a.id.localeCompare(b.id));
+}
+
 class Studios extends EventEmitter {
   constructor(initial = {}, dependencies = {}) {
     super(); this.dependencies = dependencies;
@@ -31,14 +41,8 @@ class Studios extends EventEmitter {
       let manifest;
       try { manifest = JSON.parse(await fs.readFile(path.join(root, 'package.json'), 'utf8')); } catch {}
       if (manifest?.name !== 'motionkit') throw new Error('Choose the standalone MotionKit folder containing its package.json.');
-      const films = [];
-      const brands = await fs.readdir(path.join(root, 'brands'), { withFileTypes: true });
-      for (const brand of brands) if (brand.isDirectory() && /^[\w-]+$/.test(brand.name)) {
-        let entries = [];
-        try { entries = await fs.readdir(path.join(root, 'brands', brand.name, 'films')); } catch {}
-        for (const file of entries) if (/^[\w-]+\.html$/.test(file)) films.push({ id: `${brand.name}/${file.slice(0, -5)}`, name: file.slice(0, -5), brand: brand.name });
-      }
-      this.closePreview(); this.state.editing = { root, films: films.sort((a, b) => a.id.localeCompare(b.id)) };
+      const films = await discoverFilms(root);
+      this.closePreview(); this.state.editing = { root, films };
     } else {
       for (const file of ['automatic.py', 'make_video.py', 'workflow.py', 'commons_footage.py']) {
         if (!(await fs.stat(path.join(root, file)).catch(() => null))?.isFile()) throw new Error('Choose the faceless workflow folder containing automatic.py and commons_footage.py.');
@@ -46,6 +50,13 @@ class Studios extends EventEmitter {
       this.state.faceless = { root, job: emptyJob() };
     }
     this.publish(); return this.state;
+  }
+  async refreshFilms() {
+    const root = this.state.editing.root;
+    if (!root) throw new Error('Select your standalone MotionKit folder first.');
+    const films = await discoverFilms(root);
+    if (this.state.editing.root === root) { this.state.editing.films = films; this.publish(); }
+    return this.state;
   }
   async previewFilm(id) {
     const { root, films } = this.state.editing;

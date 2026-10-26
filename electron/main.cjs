@@ -6,8 +6,9 @@ const { Coordinator } = require('./coordinator.cjs');
 const { changes, fileDiff } = require('./workspace.cjs');
 const { Studios } = require('./studios.cjs');
 const { WorkspaceStore } = require('./persistence.cjs');
+const { MotionEditor } = require('./editor.cjs');
 
-let win, coordinator, studios, store, persistence, saveTimer, publishTimer, closing = false;
+let win, coordinator, studios, editor, store, persistence, saveTimer, publishTimer, editPublishTimer, closing = false, editingChoosing = false;
 const dev = process.argv.includes('--dev');
 const headlessTest = process.argv.includes('--headless-test');
 if (headlessTest && process.env.CXC_TEST_USER_DATA) app.setPath('userData', process.env.CXC_TEST_USER_DATA);
@@ -22,7 +23,7 @@ const links = {
 
 function save() {
   if (!coordinator || !persistence) return Promise.resolve();
-  return persistence.save({ ...coordinator.serialize(), studios: studios?.serialize() });
+  return persistence.save({ ...coordinator.serialize(), studios: studios?.serialize(), editor: editor?.serialize() });
 }
 
 function scheduleSave() {
@@ -33,17 +34,27 @@ function scheduleSave() {
 async function captureDraft() {
   if (!win || win.isDestroyed() || win.webContents.isDestroyed()) return;
   let timer;
-  const pending = win.webContents.executeJavaScript('(() => { const input = document.getElementById("task-prompt"); return input ? { id: input.dataset.chatId, value: input.value } : null; })()').catch(() => undefined);
+  const pending = win.webContents.executeJavaScript('Array.from(document.querySelectorAll("#task-prompt, #edit-prompt"), input => ({ id: input.dataset.chatId, value: input.value, editing: input.id === "edit-prompt" }))').catch(() => undefined);
   const value = await Promise.race([pending, new Promise(resolve => { timer = setTimeout(resolve, 1500); })]);
   clearTimeout(timer);
-  if (typeof value?.value === 'string' && coordinator.chats.some(chat => chat.id === value.id)) coordinator.setDraft(value.id, value.value);
+  for (const draft of Array.isArray(value) ? value : []) {
+    const owner = draft.editing ? editor?.coordinator : coordinator;
+    if (typeof draft.value === 'string' && owner?.chats.some(chat => chat.id === draft.id)) owner.setDraft(draft.id, draft.value);
+  }
+}
+
+async function refreshConnections() {
+  if (editor?.state.busy) throw new Error('Finish or stop the edit before refreshing connections.');
+  const state = await coordinator.refresh();
+  editor.state.agents = state.agents; editor.coordinator.publish();
+  return state;
 }
 
 app.on('second-instance', async () => {
   if (!win || win.isDestroyed()) return;
   if (win.isMinimized()) win.restore(); win.show(); win.focus();
   if (closing) return;
-  if (coordinator.state.busy) { coordinator.event('system', 'Finish or stop the current task before opening a new chat.', 'notice'); return; }
+  if (coordinator.state.busy || editor.state.busy) { coordinator.event('system', 'Finish or stop the current task before opening a new chat.', 'notice'); return; }
   try { await captureDraft(); coordinator.fresh(); }
   catch (error) { console.error('Could not start a fresh chat:', error.message); }
 });
@@ -52,7 +63,7 @@ function registerHandlers() {
   const handle = (channel, fn) => ipcMain.handle(channel, async (event, ...args) => {
     if (event.sender !== win?.webContents || event.senderFrame !== win.webContents.mainFrame) throw new Error('Unknown sender.');
     try {
-      if (closing && !['workspace:state', 'studios:state', 'workspace:draft', 'app:window'].includes(channel)) throw new Error('The workspace is saving and closing.');
+      if (closing && !['workspace:state', 'studios:state', 'editing:state', 'workspace:draft', 'editing:draft', 'app:window'].includes(channel)) throw new Error('The workspace is saving and closing.');
       return { ok: true, value: await fn(...args) };
     }
     catch (error) { return { ok: false, error: error.message }; }
@@ -71,8 +82,11 @@ function registerHandlers() {
   handle('workspace:chat', id => coordinator.selectChat(id));
   handle('workspace:draft', (id, value) => coordinator.setDraft(id, value));
   handle('agents:approvalMode', mode => coordinator.setApprovalMode(mode));
-  handle('agents:refresh', () => coordinator.refresh());
-  handle('agents:start', task => coordinator.start(task));
+  handle('agents:refresh', refreshConnections);
+  handle('agents:start', task => {
+    if (editor.state.busy) throw new Error('Finish or stop the edit before starting a coding task.');
+    return coordinator.start(task);
+  });
   handle('agents:stop', agent => coordinator.stop(agent));
   handle('agents:approve', (id, allow, content) => {
     if (typeof id !== 'string' || typeof allow !== 'boolean') throw new Error('Invalid approval.');
@@ -93,9 +107,36 @@ function registerHandlers() {
   handle('studios:state', () => studios.state);
   handle('studios:choose', async kind => {
     if (!['editing', 'faceless'].includes(kind)) throw new Error('Unknown studio.');
-    const result = await dialog.showOpenDialog(win, { title: kind === 'editing' ? 'Select your standalone MotionKit folder' : 'Select your faceless workflow folder', properties: ['openDirectory'] });
-    if (!result.canceled) await studios.configure(kind, result.filePaths[0]);
-    return studios.state;
+    if (kind === 'editing' && (editor.state.busy || editingChoosing)) throw new Error('Finish or stop the edit before changing MotionKit folders.');
+    if (kind === 'editing') editingChoosing = true;
+    try {
+      const result = await dialog.showOpenDialog(win, { title: kind === 'editing' ? 'Select your standalone MotionKit folder' : 'Select your faceless workflow folder', properties: ['openDirectory'] });
+      if (!result.canceled) {
+        await captureDraft(); await studios.configure(kind, result.filePaths[0]);
+        if (kind === 'editing') editor.attach(studios.state.editing.root);
+      }
+      return studios.state;
+    } finally { if (kind === 'editing') editingChoosing = false; }
+  });
+  handle('studios:films', () => studios.refreshFilms());
+  handle('editing:state', () => editor.state);
+  handle('editing:start', input => {
+    if (editingChoosing) throw new Error('Finish selecting your MotionKit folder first.');
+    return editor.start(input, studios, coordinator);
+  });
+  handle('editing:stop', agent => editor.coordinator.stop(agent));
+  handle('editing:fresh', () => editor.fresh(studios.state.editing.root));
+  handle('editing:chat', id => editor.select(id, studios.state.editing.root));
+  handle('editing:draft', (id, value) => editor.coordinator.setDraft(id, value));
+  handle('editing:approvalMode', mode => editor.coordinator.setApprovalMode(mode));
+  handle('editing:approve', (id, allow, content) => {
+    if (typeof id !== 'string' || typeof allow !== 'boolean') throw new Error('Invalid approval.');
+    editor.coordinator.answer(id, allow, content);
+  });
+  handle('editing:inputUrl', id => {
+    const item = editor.state.approvals.find(item => item.id === id && item.kind === 'url');
+    if (!item?.url || new URL(item.url).protocol !== 'https:') throw new Error('This request has no supported HTTPS link.');
+    return shell.openExternal(item.url);
   });
   handle('studios:preview', async id => { await shell.openExternal(await studios.previewFilm(id)); });
   handle('studios:open', async (kind, target) => {
@@ -106,7 +147,7 @@ function registerHandlers() {
   handle('studios:stop', () => studios.stopFaceless());
   handle('agents:signin', async agent => {
     if (!['codex', 'claude'].includes(agent)) throw new Error('Unknown agent.');
-    if (coordinator.state.busy) throw new Error('Finish the current task before signing in.');
+    if (coordinator.state.busy || editor.state.busy) throw new Error('Finish the current task before signing in.');
     const executable = coordinator.state.agents[agent]?.path;
     if (!executable) throw new Error('Install the agent first, then refresh connections.');
     // No credentials ever enter the renderer. The native CLI owns sign-in.
@@ -140,8 +181,10 @@ app.whenReady().then(async () => {
   try { initial = JSON.parse(await fs.readFile(store, 'utf8')); } catch {}
   if (initial.project) try { if (!(await fs.stat(initial.project)).isDirectory()) initial.project = null; } catch { initial.project = null; }
   coordinator = Coordinator.launch(initial);
+  editor = new MotionEditor(initial.editor);
   studios = new Studios({ ...initial.studios, faceless: initial.studios?.faceless || process.env.CXC_FACELESS_ROOT || path.resolve(__dirname, '../..') });
   await studios.initialize();
+  if (studios.state.editing.root) editor.attach(studios.state.editing.root);
   let initialSaveError;
   await save().catch(error => { initialSaveError = error; });
   win = new BrowserWindow({
@@ -160,20 +203,27 @@ app.whenReady().then(async () => {
     if (!win.isDestroyed()) win.webContents.send('studios:update', studios.state);
     scheduleSave();
   });
+  editor.on('state', () => {
+    if (!editPublishTimer) editPublishTimer = setTimeout(() => {
+      editPublishTimer = null;
+      if (!win.isDestroyed()) win.webContents.send('editing:update', editor.state);
+    }, 35);
+    scheduleSave();
+  });
   registerHandlers();
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.webContents.on('will-navigate', event => event.preventDefault());
   win.on('close', event => {
     if (closing) { event.preventDefault(); return; }
-    if (coordinator.state.busy || studios.child || studios.starting) {
+    if (coordinator.state.busy || editor.state.busy || studios.child || studios.starting) {
       const choice = dialog.showMessageBoxSync(win, { type: 'question', buttons: ['Keep working', 'Stop and close'], defaultId: 0, cancelId: 0, message: 'Work is still running.', detail: 'Closing stops the current agents and video generation.' });
       if (choice === 0) { event.preventDefault(); return; }
     }
     event.preventDefault(); closing = true; win.setEnabled(false);
     (async () => {
       try {
-        await captureDraft(); coordinator.close();
-        clearTimeout(saveTimer); clearTimeout(publishTimer);
+        await captureDraft(); coordinator.close(); editor.close();
+        clearTimeout(saveTimer); clearTimeout(publishTimer); clearTimeout(editPublishTimer);
         await studios.stopFaceless();
         await save();
         await studios.close();
@@ -187,7 +237,7 @@ app.whenReady().then(async () => {
   });
   if (dev) await win.loadURL('http://127.0.0.1:5173'); else await win.loadFile(path.join(__dirname, '../dist/index.html'));
   if (initialSaveError) coordinator.event('system', `Autosave is unavailable: ${initialSaveError.message}. The app will stay open if saving fails when you close.`, 'error');
-  coordinator.refresh().catch(error => coordinator.event('system', error.message, 'error'));
+  refreshConnections().catch(error => coordinator.event('system', error.message, 'error'));
 });
 
 app.on('window-all-closed', () => app.quit());

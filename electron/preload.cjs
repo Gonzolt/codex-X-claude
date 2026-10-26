@@ -18,6 +18,21 @@ contextBridge.exposeInMainWorld('desktop', {
   appearance: value => ipcRenderer.invoke('workspace:appearance', value),
   openLink: name => ipcRenderer.invoke('app:link', name),
   getStudios: () => ipcRenderer.invoke('studios:state'),
+  getEditor: () => ipcRenderer.invoke('editing:state'),
+  startEdit: input => ipcRenderer.invoke('editing:start', input),
+  stopEdit: agent => ipcRenderer.invoke('editing:stop', agent),
+  freshEdit: () => ipcRenderer.invoke('editing:fresh'),
+  selectEditChat: id => ipcRenderer.invoke('editing:chat', id),
+  setEditDraft: (id, value) => ipcRenderer.invoke('editing:draft', id, value),
+  editApprovalMode: mode => ipcRenderer.invoke('editing:approvalMode', mode),
+  approveEdit: (id, allow, content) => ipcRenderer.invoke('editing:approve', id, allow, content),
+  editInputUrl: id => ipcRenderer.invoke('editing:inputUrl', id),
+  refreshFilms: () => ipcRenderer.invoke('studios:films'),
+  subscribeEditor: callback => {
+    const listener = (_event, state) => callback(state);
+    ipcRenderer.on('editing:update', listener);
+    return () => ipcRenderer.removeListener('editing:update', listener);
+  },
   chooseStudio: kind => ipcRenderer.invoke('studios:choose', kind),
   previewMotion: id => ipcRenderer.invoke('studios:preview', id),
   openStudio: (kind, target) => ipcRenderer.invoke('studios:open', kind, target),

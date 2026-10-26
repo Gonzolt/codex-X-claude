@@ -1,13 +1,15 @@
 import { useState } from 'react';
+import type { ReactNode } from 'react';
 import { ArrowRight, ArrowUpRight, Check, Clapperboard, ExternalLink, Film, FolderOpen, Play, RefreshCw, Sparkles, Square, Video } from 'lucide-react';
 import type { Desktop, Result, StudioKind, Studios, VideoInput } from './types';
 import './studios.css';
 
 export const EMPTY_STUDIOS: Studios = { editing: { root: null, films: [] }, faceless: { root: null, job: { status: 'idle', stage: 'Ready when you are.', logs: [], video: null } } };
 
-export function StudioPage({ kind, state, desktop, report, update, input, setInput }: {
+export function StudioPage({ kind, state, desktop, report, update, input, setInput, editingAssistant, editorBusy = false }: {
   kind: StudioKind; state: Studios; desktop: Desktop; report(message: string): void;
   update(state: Studios): void; input: VideoInput; setInput(value: VideoInput): void;
+  editingAssistant?(film: string | null): ReactNode; editorBusy?: boolean;
 }) {
   const [pending, setPending] = useState(false), [selected, setSelected] = useState('');
   const editing = kind === 'editing', root = state[kind].root, job = state.faceless.job;
@@ -34,14 +36,17 @@ export function StudioPage({ kind, state, desktop, report, update, input, setInp
     </header>
     <div className="studio-scroll">
       <section className="studio-location"><div className="studio-location-label"><FolderOpen size={17} /><div><b>{editing ? 'your MotionKit project' : 'your video workflow'}</b><span title={root || undefined}>{root || (editing ? 'Connect your standalone MotionKit folder.' : 'Choose the folder with 03_AUTOMATIC_VIDEO.cmd.')}</span></div></div>
-        <button className="bevel-button" disabled={pending || (!editing && running)} onClick={choose}><FolderOpen size={13} />{pending ? 'opening…' : root ? 'change folder' : 'choose folder'}</button>
+        <button className="bevel-button" disabled={pending || (editing ? editorBusy : running)} onClick={choose}><FolderOpen size={13} />{pending ? 'opening…' : root ? 'change folder' : 'choose folder'}</button>
       </section>
       {editing ? <>
+        <div className="motion-edit-layout">
         <section className="motion-workbench"><div className="motion-stage" aria-hidden="true"><div className="motion-grid" /><span className="motion-guide horizontal" /><span className="motion-guide vertical" /><span className="motion-corner top" /><span className="motion-corner bottom" /><div className="motion-word"><span>make</span><b>it move.</b></div><span className="motion-timecode">00:00:00 / your next idea</span><span className="motion-spark">✳</span></div>
-          <div className="motion-film-picker"><label htmlFor="motion-film">the film</label><select id="motion-film" value={film} disabled={!state.editing.films.length} onChange={event => setSelected(event.target.value)}>{state.editing.films.length ? state.editing.films.map(item => <option key={item.id} value={item.id}>{item.brand} / {item.name}</option>) : <option value="">{root ? 'no films found' : 'select a MotionKit project first'}</option>}</select>
+          <div className="motion-film-picker"><label htmlFor="motion-film">the film</label><select id="motion-film" value={film} disabled={editorBusy || !state.editing.films.length} onChange={event => setSelected(event.target.value)}>{state.editing.films.length ? state.editing.films.map(item => <option key={item.id} value={item.id}>{item.brand} / {item.name}</option>) : <option value="">{root ? 'no films found' : 'select a MotionKit project first'}</option>}</select>
             <button className="bevel-button studio-primary" disabled={!film} onClick={() => perform(desktop.previewMotion(film))}><Play size={13} />open live preview<ArrowUpRight size={12} /></button></div>
         </section>
-        <div className="studio-detail-grid"><section className="studio-note"><span className="studio-note-icon"><Film size={18} /></span><h2>its own creative space.</h2><p>MotionKit stays in its own project. Edit your films there, then open the live preview to play and scrub your motion.</p><button disabled={!root} onClick={() => perform(desktop.openStudio('editing', 'root'))}>open project folder<ArrowUpRight size={12} /></button></section>
+        {editingAssistant?.(film || null)}
+        </div>
+        <div className="studio-detail-grid"><section className="studio-note"><span className="studio-note-icon"><Film size={18} /></span><h2>its own creative space.</h2><p>Describe your changes to ChatGPT / Codex, Claude, or both. They edit the files in your standalone MotionKit project; open the preview to inspect the result.</p><button disabled={!root} onClick={() => perform(desktop.openStudio('editing', 'root'))}>open project folder<ArrowUpRight size={12} /></button></section>
           <section className="studio-note"><span className="studio-note-icon peach"><Clapperboard size={18} /></span><h2>plain code. real motion.</h2><p>Kinetic type, transitions, camera moves and frame-by-frame exports. Keep creating with the tools in your MotionKit project.</p><button onClick={() => perform(desktop.openLink('motionkit'))}>open MotionKit repository<ExternalLink size={12} /></button></section></div>
       </> : <>
         <div className="faceless-layout"><form className="video-brief" onSubmit={event => { event.preventDefault(); generate(); }}><div className="studio-section-title"><Sparkles size={16} /><h2>what’s the story?</h2><span>01 / the brief</span></div>
