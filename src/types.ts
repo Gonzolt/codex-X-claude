@@ -19,6 +19,7 @@ export type StudioKind = 'editing' | 'faceless';
 export type VideoJob = { status: 'idle' | 'running' | 'done' | 'stopped' | 'error'; stage: string; logs: string[]; video: string | null };
 export type Studios = { editing: { root: string | null; films: { id: string; name: string; brand: string }[] }; faceless: { root: string | null; job: VideoJob } };
 export type VideoInput = { topic: string; genre: 'reflection' | 'fiction' | 'factual'; scenes: number; notes: string };
+export type EditInput = { prompt: string; target: Agent | 'both'; film: string | null };
 export type Desktop = {
   getState(): Promise<Result<Workspace>>;
   chooseProject(): Promise<Result<string | null>>;
@@ -37,6 +38,17 @@ export type Desktop = {
   appearance(value: Appearance): Promise<Result>;
   openLink(name: 'repository' | 'motionkit' | Agent): Promise<Result>;
   getStudios(): Promise<Result<Studios>>;
+  getEditor(): Promise<Result<Workspace>>;
+  startEdit(input: EditInput): Promise<Result<Workspace>>;
+  stopEdit(agent?: Agent): Promise<Result>;
+  freshEdit(): Promise<Result<Workspace>>;
+  selectEditChat(id: string): Promise<Result<Workspace>>;
+  setEditDraft(id: string, value: string): Promise<Result>;
+  editApprovalMode(mode: 'ask' | 'auto'): Promise<Result>;
+  approveEdit(id: string, allow: boolean, content?: unknown): Promise<Result>;
+  editInputUrl(id: string): Promise<Result>;
+  refreshFilms(): Promise<Result<Studios>>;
+  subscribeEditor(callback: (state: Workspace) => void): () => void;
   chooseStudio(kind: StudioKind): Promise<Result<Studios>>;
   previewMotion(id: string): Promise<Result>;
   openStudio(kind: StudioKind, target: 'root' | 'video' | 'output'): Promise<Result>;

@@ -191,7 +191,7 @@ class Coordinator extends EventEmitter {
     return this.state;
   }
   async execute(task) {
-    const context = 'You are working inside Codex x Claude, a local desktop workspace. Stay focused on the user task. Do not commit, push, publish, or deploy unless explicitly requested.\n\n';
+    const context = 'You are working inside Codex x Claude, a local desktop workspace. Stay focused on the user task. Do not commit, push, publish, or deploy unless explicitly requested.\n\n' + (this.dependencies.taskContext?.() || '');
     if (task.target !== 'both') {
       await this.runOne(task.target, context + task.prompt, task.mode === 'compare');
     } else if (task.mode === 'compare') {

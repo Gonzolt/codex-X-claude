@@ -45,5 +45,23 @@ fixture. This change does not verify all MotionKit films, voice engines or expor
 commands on Windows; those stay in the separate MotionKit project. No live
 Codex/Claude subscription turns were started during this review. Adapter and
 coordinator behavior was tested with protocol/client fixtures, not a fresh
-end-to-end coding-agent session. This review does not claim that the application
+end-to-end coding-agent session. This original tab review does not claim that the application
 is free of all bugs.
+
+## Prompt editing update (0.3.0)
+
+The Editing tab now has an independent saved editing chat, a prompt box and
+ChatGPT/Codex, Claude, and both-agent choices. The selected MotionKit root and
+film are supplied to the agent as task context without changing the coding
+workspace's project, transcript or permissions. Both mode edits with Codex and
+reviews with Claude, with fixes returned to Codex. Competing coding/editing agent
+tasks are rejected. Editing prompts, sessions and permissions save independently.
+
+Validation on this PC: all 44 automated tests pass, along with the production
+TypeScript/Vite build and native chat/desktop checks. The Editing UI was checked
+in light, dark and compact layouts. Native checks verified all three selectors,
+actual fixture-file changes, separate history, draft retention and close saving.
+The optional live check also passed with the signed-in native Codex and Claude
+clients: Codex edited the generated file, Claude edited it, and Codex edited it
+again with a completed structured Claude review. These were small generated test
+files, with no private MotionKit code, uploads, paid API calls or real film export.

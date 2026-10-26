@@ -9,12 +9,28 @@ The interface is yours to change. There is no hosted application service and no 
 The browser-style tab strip has three independent spaces:
 
 - **Codex × Claude** keeps the saved coding chats, agent collaboration, approvals and Git previews.
-- **Editing** connects to a local checkout of [MotionKit](https://github.com/Gonzolt/motionkit). Select that folder once, choose a discovered film, and use **open live preview** to launch its own browser player/scrubber. MotionKit remains a separate project; its source is neither bundled nor copied into this repository. Edit and export with MotionKit's own tools. The artwork in this tab is a launcher illustration, not an embedded editor or live film preview.
+- **Editing** connects to a local checkout of [MotionKit](https://github.com/Gonzolt/motionkit). Select that folder, choose a film, and describe your edit. Pick **ChatGPT / Codex**, **Claude**, or **both**. Single-agent mode edits with the selected agent; both mode lets Codex edit and Claude review/request fixes with the existing bounded repair loop. The agents work on the actual MotionKit files. Use **open live preview** to inspect the result in MotionKit's own player/scrubber. MotionKit remains a separate project; its private source is neither bundled nor copied into this repository. The artwork in the tab is an illustration, not an embedded film preview.
 - **Faceless** connects to the existing free local video workflow. Select the folder containing `automatic.py`, `commons_footage.py`, and its installed `.venv`. Enter a topic, choose reflection/fiction/factual mode and a scene count, then choose **make my video**. Factual mode requires checked notes and source links. The tab shows live production output, can stop the video process tree, and opens the completed MP4 or its files/credits folder.
 
 Faceless uses the selected workflow's local Ollama scriptwriter and Piper voice, with key-free Wikimedia Commons footage. Run that workflow's `01_SETUP.cmd` and `04_SETUP_LOCAL_AI.cmd` once if needed. The workflow and its downloaded models are separate from this desktop application's install. Existing local installations stay in place. No paid voice service or automatic publishing is enabled.
 
 Studio folders are saved locally, independently of coding projects and chats. Switching tabs preserves an unfinished video brief and keeps an active render running. Closing the app asks before stopping active work. A MotionKit preview server serves only project assets on a local loopback port and closes with the desktop app.
+
+### Prompting an edit
+
+1. Open **Editing** and select your standalone MotionKit folder.
+2. Choose an existing film, or request a new film when the project has none.
+3. Type the change in **what would you like to change?** and choose your editor.
+4. Select **make the edit** or press Ctrl+Enter. Follow progress and answer any permission/input requests. **Stop edit** cancels that editing task.
+5. Open the live preview and inspect the changed film. New films are discovered after the task finishes.
+
+The ChatGPT option uses the application's existing native **Codex** connection;
+it does not automate the ChatGPT website or introduce another API-key service.
+Claude uses the existing Claude Code connection. Account access/usage limits apply.
+Editing has its own saved chats, drafts, native sessions and approval mode.
+Coding and editing agent tasks run one at a time to avoid competing writes.
+Film creation and exports still depend on MotionKit's tools/assets being installed;
+the agent must verify a render before reporting a successful export.
 
 ## First launch
 
@@ -109,6 +125,7 @@ npm test
 npm run build
 npm run test:desktop
 npm run test:chats
+npm run test:editing
 ```
 
 `test:desktop` uses an isolated profile and generated MotionKit/Git fixtures; it
@@ -118,6 +135,13 @@ layout screenshots under `.cache/`. With an installed faceless workflow availabl
 through the native IPC controls. That optional check uses network access for
 Commons footage, without paid services. See `REVIEW.md` for this change's verified
 bug fixes and remaining integration limits.
+
+`test:editing` uses generated test films and fixture agents to verify native UI
+submission for all three editor choices. `npm run test:editing -- --live` runs
+small real file edits with the locally signed-in agents instead; it uses their
+existing account access and consumes their usage allowance. Neither mode edits
+the user's real MotionKit project. The live check only approves direct Write/Edit
+requests for the generated fixture file and declines other approval requests.
 
 27 automated tests cover history migration and persistence, saved native session restoration across modes, chat switching protection, activity classification, auto-approval versus actual questions, MCP inputs, bounded review/repair, Claude completion/disconnection, streaming, stop controls, Codex sandbox values, and Git previews. Isolated Electron UI checks exercise saved chats and drafts, live statuses, permission and question dialogs, restart persistence, dark/light themes, and compact layout. Earlier native connection checks confirmed both agents respond using subscription sign-ins.
 
