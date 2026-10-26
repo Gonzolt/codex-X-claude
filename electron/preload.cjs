@@ -16,6 +16,17 @@ contextBridge.exposeInMainWorld('desktop', {
   diff: name => ipcRenderer.invoke('workspace:diff', name),
   appearance: value => ipcRenderer.invoke('workspace:appearance', value),
   openLink: name => ipcRenderer.invoke('app:link', name),
+  getStudios: () => ipcRenderer.invoke('studios:state'),
+  chooseStudio: kind => ipcRenderer.invoke('studios:choose', kind),
+  previewMotion: id => ipcRenderer.invoke('studios:preview', id),
+  openStudio: (kind, target) => ipcRenderer.invoke('studios:open', kind, target),
+  runFaceless: input => ipcRenderer.invoke('studios:run', input),
+  stopFaceless: () => ipcRenderer.invoke('studios:stop'),
+  subscribeStudios: callback => {
+    const listener = (_event, state) => callback(state);
+    ipcRenderer.on('studios:update', listener);
+    return () => ipcRenderer.removeListener('studios:update', listener);
+  },
   window: action => ipcRenderer.invoke('app:window', action),
   subscribe: callback => {
     const listener = (_event, state) => callback(state);

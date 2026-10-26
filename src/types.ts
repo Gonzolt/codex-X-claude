@@ -15,6 +15,10 @@ export type Workspace = {
 export type Task = { prompt: string; target: Agent | 'both'; mode: 'build' | 'compare' };
 export type Changes = { files: { path: string; status: string }[]; isGit: boolean };
 export type Result<T = void> = { ok: true; value: T } | { ok: false; error: string };
+export type StudioKind = 'editing' | 'faceless';
+export type VideoJob = { status: 'idle' | 'running' | 'done' | 'stopped' | 'error'; stage: string; logs: string[]; video: string | null };
+export type Studios = { editing: { root: string | null; films: { id: string; name: string; brand: string }[] }; faceless: { root: string | null; job: VideoJob } };
+export type VideoInput = { topic: string; genre: 'reflection' | 'fiction' | 'factual'; scenes: number; notes: string };
 export type Desktop = {
   getState(): Promise<Result<Workspace>>;
   chooseProject(): Promise<Result<string | null>>;
@@ -30,7 +34,14 @@ export type Desktop = {
   changes(): Promise<Result<Changes>>;
   diff(name: string): Promise<Result<string>>;
   appearance(value: Appearance): Promise<Result>;
-  openLink(name: 'repository' | Agent): Promise<Result>;
+  openLink(name: 'repository' | 'motionkit' | Agent): Promise<Result>;
+  getStudios(): Promise<Result<Studios>>;
+  chooseStudio(kind: StudioKind): Promise<Result<Studios>>;
+  previewMotion(id: string): Promise<Result>;
+  openStudio(kind: StudioKind, target: 'root' | 'video' | 'output'): Promise<Result>;
+  runFaceless(input: VideoInput): Promise<Result<Studios>>;
+  stopFaceless(): Promise<Result>;
+  subscribeStudios(callback: (state: Studios) => void): () => void;
   window(action: 'minimize' | 'maximize' | 'close'): Promise<Result>;
   subscribe(callback: (state: Workspace) => void): () => void;
 };

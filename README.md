@@ -4,6 +4,18 @@ A personal Windows desktop workspace for Codex and Claude Code, with a retro bro
 
 The interface is yours to change. There is no hosted application service and no API-key entry screen. Agents run as local processes and use their supported account authentication. Provider access and subscription limits still apply.
 
+## Workspace tabs
+
+The browser-style tab strip has three independent spaces:
+
+- **Codex × Claude** keeps the saved coding chats, agent collaboration, approvals and Git previews.
+- **Editing** connects to a local checkout of [MotionKit](https://github.com/Gonzolt/motionkit). Select that folder once, choose a discovered film, and use **open live preview** to launch its own browser player/scrubber. MotionKit remains a separate project; its source is neither bundled nor copied into this repository. Edit and export with MotionKit's own tools. The artwork in this tab is a launcher illustration, not an embedded editor or live film preview.
+- **Faceless** connects to the existing free local video workflow. Select the folder containing `automatic.py`, `commons_footage.py`, and its installed `.venv`. Enter a topic, choose reflection/fiction/factual mode and a scene count, then choose **make my video**. Factual mode requires checked notes and source links. The tab shows live production output, can stop the video process tree, and opens the completed MP4 or its files/credits folder.
+
+Faceless uses the selected workflow's local Ollama scriptwriter and Piper voice, with key-free Wikimedia Commons footage. Run that workflow's `01_SETUP.cmd` and `04_SETUP_LOCAL_AI.cmd` once if needed. The workflow and its downloaded models are separate from this desktop application's install. Existing local installations stay in place. No paid voice service or automatic publishing is enabled.
+
+Studio folders are saved locally, independently of coding projects and chats. Switching tabs preserves an unfinished video brief and keeps an active render running. Closing the app asks before stopping active work. A MotionKit preview server serves only project assets on a local loopback port and closes with the desktop app.
+
 ## First launch
 
 1. Install [Codex CLI](https://developers.openai.com/codex/cli) and [Claude Code](https://code.claude.com/docs/en/setup) using their official installers. On Windows, use their native executables; PowerShell/npm `.cmd` shims alone are not supported by this first version.
@@ -56,6 +68,9 @@ npm ci
 npm run dev
 ```
 
+The root `postinstall` downloads the pinned Electron runtime explicitly. This is
+required by the Electron 45 package; the package alone does not install its binary.
+
 For a production run:
 
 ```powershell
@@ -88,7 +103,16 @@ Chat activity can contain source code and prompts. The app stores chats, native 
 ```powershell
 npm test
 npm run build
+npm run test:desktop
 ```
+
+`test:desktop` uses an isolated profile and generated MotionKit/Git fixtures; it
+does not sign in or start coding-agent turns. It captures light, dark and compact
+layout screenshots under `.cache/`. With an installed faceless workflow available,
+`npm run test:desktop -- --live-faceless` also runs a real two-scene local video
+through the native IPC controls. That optional check uses network access for
+Commons footage, without paid services. See `REVIEW.md` for this change's verified
+bug fixes and remaining integration limits.
 
 27 automated tests cover history migration and persistence, saved native session restoration across modes, chat switching protection, activity classification, auto-approval versus actual questions, MCP inputs, bounded review/repair, Claude completion/disconnection, streaming, stop controls, Codex sandbox values, and Git previews. Isolated Electron UI checks exercise saved chats and drafts, live statuses, permission and question dialogs, restart persistence, dark/light themes, and compact layout. Earlier native connection checks confirmed both agents respond using subscription sign-ins.
 

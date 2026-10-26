@@ -124,7 +124,13 @@ class Coordinator extends EventEmitter {
   client(agent) {
     if (!this.clients[agent]) {
       const Agent = this.dependencies[agent] || (agent === 'codex' ? CodexAgent : ClaudeAgent);
-      this.clients[agent] = new Agent(this.state.agents[agent].path, (...args) => this.event(...args), (...args) => this.ask(...args));
+      const chatId = this.state.activeChatId;
+      let client;
+      const active = () => client && this.clients[agent] === client && this.state.activeChatId === chatId;
+      client = new Agent(this.state.agents[agent].path,
+        (...args) => { if (active()) this.event(...args); },
+        (...args) => active() ? this.ask(...args) : Promise.resolve(args[3] ? { action: 'decline' } : false));
+      this.clients[agent] = client;
       this.clients[agent].restoreSession?.(this.chats.find(chat => chat.id === this.state.activeChatId).sessions[agent]);
     }
     return this.clients[agent];

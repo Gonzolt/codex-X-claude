@@ -41,10 +41,11 @@ async function detectAgents() {
 }
 
 class CodexAgent {
-  constructor(path, emit, approval) {
+  constructor(path, emit, approval, dependencies = {}) {
     this.path = path; this.emit = emit; this.approval = approval;
     this.pending = new Map(); this.sequence = 0; this.thread = null; this.turn = null;
     this.child = null; this.waiter = null; this.stopping = false;
+    this.stopGraceMs = dependencies.stopGraceMs ?? 2500;
   }
   restoreSession(session) { this.savedSession = session; }
   exportSession() { return this.thread ? { threadId: this.thread, cwd: this.cwd, readOnly: this.readOnly } : this.savedSession || null; }
@@ -83,6 +84,7 @@ class CodexAgent {
     });
   }
   fail(error) {
+    clearTimeout(this.stopTimer); this.stopTimer = null;
     for (const request of this.pending.values()) { clearTimeout(request.timer); request.reject(error); }
     this.pending.clear();
     if (this.waiter) { this.waiter.reject(error); this.waiter = null; }
@@ -142,6 +144,7 @@ class CodexAgent {
     if (message.method === 'turn/diff/updated') this.emit('codex', 'File changes updated', 'change');
     if (message.method === 'error') this.emit('codex', params.error?.message || 'Codex reported an error', params.willRetry ? 'notice' : 'error');
     if (message.method === 'turn/completed' && this.waiter) {
+      clearTimeout(this.stopTimer); this.stopTimer = null;
       const waiter = this.waiter; this.waiter = null; this.turn = null;
       if (params.turn.status === 'completed') waiter.resolve(this.answer || 'Task completed.');
       else waiter.reject(new Error(params.turn.status === 'interrupted' ? 'Stopped.' : params.turn.error?.message || 'Codex could not finish the task.'));
@@ -175,7 +178,13 @@ class CodexAgent {
   }
   async stop() {
     this.stopping = true;
-    if (this.thread && this.turn) await this.request('turn/interrupt', { threadId: this.thread, turnId: this.turn });
+    if (!this.child) return;
+    clearTimeout(this.stopTimer);
+    this.stopTimer = setTimeout(() => this.closeWithError(new Error('Stopped.')), this.stopGraceMs);
+    if (this.thread && this.turn) {
+      try { await this.request('turn/interrupt', { threadId: this.thread, turnId: this.turn }); }
+      catch (error) { if (!this.stopping) throw error; }
+    } else this.closeWithError(new Error('Stopped.'));
   }
   closeWithError(error) {
     const child = this.child;

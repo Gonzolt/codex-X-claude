@@ -4,8 +4,9 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const { Coordinator } = require('./coordinator.cjs');
 const { changes, fileDiff } = require('./workspace.cjs');
+const { Studios } = require('./studios.cjs');
 
-let win, coordinator, store, saveTimer, publishTimer, closing = false;
+let win, coordinator, studios, store, saveTimer, publishTimer, closing = false;
 let saveQueue = Promise.resolve();
 const dev = process.argv.includes('--dev');
 const headlessTest = process.argv.includes('--headless-test');
@@ -13,12 +14,13 @@ if (headlessTest && process.env.CXC_TEST_USER_DATA) app.setPath('userData', proc
 const links = {
   repository: 'https://github.com/Gonzolt/codex-X-claude',
   codex: 'https://developers.openai.com/codex/cli',
-  claude: 'https://code.claude.com/docs/en/setup'
+  claude: 'https://code.claude.com/docs/en/setup',
+  motionkit: 'https://github.com/Gonzolt/motionkit'
 };
 
 function save() {
   if (!coordinator || !store) return Promise.resolve();
-  const value = JSON.stringify(coordinator.serialize());
+  const value = JSON.stringify({ ...coordinator.serialize(), studios: studios?.serialize() });
   saveQueue = saveQueue.catch(() => {}).then(async () => {
     try {
       await fs.writeFile(store + '.tmp', value);
@@ -66,6 +68,20 @@ function registerHandlers() {
     coordinator.state.appearance = { accent: value.accent, theme: value.theme, pattern: value.pattern, fontSize: value.fontSize };
     coordinator.publish();
   });
+  handle('studios:state', () => studios.state);
+  handle('studios:choose', async kind => {
+    if (!['editing', 'faceless'].includes(kind)) throw new Error('Unknown studio.');
+    const result = await dialog.showOpenDialog(win, { title: kind === 'editing' ? 'Select your standalone MotionKit folder' : 'Select your faceless workflow folder', properties: ['openDirectory'] });
+    if (!result.canceled) await studios.configure(kind, result.filePaths[0]);
+    return studios.state;
+  });
+  handle('studios:preview', async id => { await shell.openExternal(await studios.previewFilm(id)); });
+  handle('studios:open', async (kind, target) => {
+    const error = await shell.openPath(await studios.openPath(kind, target));
+    if (error) throw new Error(error);
+  });
+  handle('studios:run', input => studios.runFaceless(input));
+  handle('studios:stop', () => studios.stopFaceless());
   handle('agents:signin', async agent => {
     if (!['codex', 'claude'].includes(agent)) throw new Error('Unknown agent.');
     if (coordinator.state.busy) throw new Error('Finish the current task before signing in.');
@@ -100,6 +116,8 @@ app.whenReady().then(async () => {
   try { initial = JSON.parse(await fs.readFile(store, 'utf8')); } catch {}
   if (initial.project) try { if (!(await fs.stat(initial.project)).isDirectory()) initial.project = null; } catch { initial.project = null; }
   coordinator = new Coordinator(initial);
+  studios = new Studios({ ...initial.studios, faceless: initial.studios?.faceless || process.env.CXC_FACELESS_ROOT || path.resolve(__dirname, '../..') });
+  await studios.initialize();
   win = new BrowserWindow({
     width: 1440, height: 1000, minWidth: 940, minHeight: 740,
     title: 'Codex x Claude', icon: path.join(__dirname, '../build/icon.png'), frame: false, backgroundColor: '#eef4f4', show: !headlessTest,
@@ -112,18 +130,22 @@ app.whenReady().then(async () => {
     }, 35);
     clearTimeout(saveTimer); saveTimer = setTimeout(save, 700);
   });
+  studios.on('state', () => {
+    if (!win.isDestroyed()) win.webContents.send('studios:update', studios.state);
+    clearTimeout(saveTimer); saveTimer = setTimeout(save, 700);
+  });
   registerHandlers();
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.webContents.on('will-navigate', event => event.preventDefault());
   win.on('close', event => {
     if (closing) return;
-    if (coordinator.state.busy) {
-      const choice = dialog.showMessageBoxSync(win, { type: 'question', buttons: ['Keep working', 'Stop and close'], defaultId: 0, cancelId: 0, message: 'An agent is still working.', detail: 'Closing this window stops the current task.' });
+    if (coordinator.state.busy || studios.child || studios.starting) {
+      const choice = dialog.showMessageBoxSync(win, { type: 'question', buttons: ['Keep working', 'Stop and close'], defaultId: 0, cancelId: 0, message: 'Work is still running.', detail: 'Closing stops the current agents and video generation.' });
       if (choice === 0) { event.preventDefault(); return; }
     }
     event.preventDefault(); closing = true;
     coordinator.close(); clearTimeout(saveTimer); clearTimeout(publishTimer);
-    save().finally(() => { if (!win.isDestroyed()) win.destroy(); });
+    studios.close().catch(error => console.error('Could not stop studio:', error.message)).then(save).finally(() => { if (!win.isDestroyed()) win.destroy(); });
   });
   if (dev) await win.loadURL('http://127.0.0.1:5173'); else await win.loadFile(path.join(__dirname, '../dist/index.html'));
   coordinator.refresh().catch(error => coordinator.event('system', error.message, 'error'));

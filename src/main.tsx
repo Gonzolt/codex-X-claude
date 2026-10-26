@@ -1,11 +1,12 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { ArrowRight, ArrowUpRight, Asterisk, Check, ChevronDown, CircleHelp, Code2, Columns2, Command, ExternalLink, FileCode2, FileDiff, Folder, FolderOpen, GitBranch, GitFork as Github, History, Link2, MessageSquare, Minus, Monitor, Moon, MoreHorizontal, Palette, Plus, RefreshCw, Settings2, ShieldCheck, Sparkles, Square, SquareTerminal, Sun, X } from 'lucide-react';
-import type { Activity, Agent, Appearance, Changes, Desktop, Result, Status, Workspace } from './types';
+import { ArrowRight, ArrowUpRight, Asterisk, Check, Clapperboard, Video, ChevronDown, CircleHelp, Code2, Columns2, Command, ExternalLink, FileCode2, FileDiff, Folder, FolderOpen, GitBranch, GitFork as Github, History, Link2, MessageSquare, Minus, Monitor, Moon, MoreHorizontal, Palette, Plus, RefreshCw, Settings2, ShieldCheck, Sparkles, Square, SquareTerminal, Sun, X } from 'lucide-react';
+import type { Activity, Agent, Appearance, Changes, Desktop, Result, Status, Workspace, Studios, VideoInput } from './types';
 import './styles.css';
 import './dark.css';
 import './chats.css';
 import { ApprovalDialog } from './ApprovalDialog';
+import { EMPTY_STUDIOS, StudioPage } from './StudioPage';
 
 const INITIAL: Workspace = {
   project: null, events: [], appearance: { accent: 'mint', theme: 'light', pattern: true, fontSize: 14 },
@@ -29,6 +30,9 @@ function browserBridge(): Desktop {
     changes: async () => ({ ok: true, value: { files: [], isGit: false } }), diff: unavailable,
     appearance: async value => { state = { ...state, appearance: value }; listeners.forEach(fn => fn(state)); return { ok: true, value: undefined }; },
     openLink: unavailable, window: unavailable,
+    getStudios: async () => ({ ok: true, value: structuredClone(EMPTY_STUDIOS) }),
+    chooseStudio: unavailable, previewMotion: unavailable, openStudio: unavailable,
+    runFaceless: unavailable, stopFaceless: unavailable, subscribeStudios: () => () => {},
     subscribe: fn => { listeners.add(fn); return () => { listeners.delete(fn); }; }
   };
 }
@@ -77,10 +81,13 @@ function EventMessage({ event }: { event: Activity }) {
 function App() {
   const [workspace, setWorkspace] = useState<Workspace>(INITIAL);
   const [prompt, setPrompt] = useState('');
+  const [studios, setStudios] = useState<Studios>(EMPTY_STUDIOS);
+  const [videoInput, setVideoInput] = useState<VideoInput>({ topic: '', genre: 'reflection', scenes: 8, notes: '' });
   const drafts = useRef<Record<string, string>>({});
   const [target, setTarget] = useState<Agent | 'both'>('both');
   const [mode, setMode] = useState<'build' | 'compare'>('build');
-  const [view, setView] = useState<'workspace' | 'activity'>('workspace');
+  const [view, setView] = useState<'workspace' | 'activity' | 'editing' | 'faceless'>('workspace');
+  const creative = view === 'editing' || view === 'faceless';
   const [modal, setModal] = useState<'connections' | 'appearance' | 'changes' | null>(null);
   const [toast, setToast] = useState('');
   const [refreshing, setRefreshing] = useState(false);
@@ -88,7 +95,7 @@ function App() {
   const [changed, setChanged] = useState<Changes>({ files: [], isGit: false });
   const [selectedFile, setSelectedFile] = useState('');
   const [diff, setDiff] = useState('');
-  const textarea = useRef<HTMLTextAreaElement>(null), diffRequest = useRef(0);
+  const textarea = useRef<HTMLTextAreaElement>(null), diffRequest = useRef(0), changesRequest = useRef(0);
   const notify = useCallback((message: string) => setToast(message), []);
   const invoke = useCallback(async <T,>(promise: Promise<Result<T>>): Promise<T | undefined> => {
     try { const result = await promise; if (!result.ok) { notify(result.error); return; } return result.value; }
@@ -100,6 +107,12 @@ function App() {
     invoke(desktop.getState()).then(state => { if (state && alive) setWorkspace(state); });
     return () => { alive = false; unsubscribe(); };
   }, [invoke]);
+  useEffect(() => {
+    let alive = true;
+    const unsubscribe = desktop.subscribeStudios(next => { if (alive) setStudios(next); });
+    invoke(desktop.getStudios()).then(next => { if (next && alive) setStudios(next); });
+    return () => { alive = false; unsubscribe(); };
+  }, [invoke]);
   useEffect(() => { if (toast) { const id = setTimeout(() => setToast(''), 7000); return () => clearTimeout(id); } }, [toast]);
   useEffect(() => {
     document.documentElement.dataset.theme = workspace.appearance.theme;
@@ -107,8 +120,9 @@ function App() {
     document.documentElement.dataset.pattern = String(workspace.appearance.pattern);
     document.documentElement.style.setProperty('--message-size', workspace.appearance.fontSize + 'px');
   }, [workspace.appearance]);
-  const refreshChanges = useCallback(async () => { const result = await invoke(desktop.changes()); if (result) setChanged(result); }, [invoke]);
-  useEffect(() => { refreshChanges(); }, [workspace.project, workspace.busy, refreshChanges]);
+  const refreshChanges = useCallback(async () => { const request = ++changesRequest.current; const result = await invoke(desktop.changes()); if (result && request === changesRequest.current) setChanged(result); }, [invoke]);
+  useEffect(() => { diffRequest.current++; changesRequest.current++; setSelectedFile(''); setDiff(''); setChanged({ files: [], isGit: false }); refreshChanges(); }, [workspace.project, refreshChanges]);
+  useEffect(() => { if (!workspace.busy) refreshChanges(); }, [workspace.busy, refreshChanges]);
   useEffect(() => {
     const listener = (event: KeyboardEvent) => {
       if (event.key === 'Escape') setModal(null);
@@ -138,23 +152,32 @@ function App() {
   }
   const activity = workspace.events.filter(e => e.agent === 'system' || ['tool', 'change', 'error', 'prompt'].includes(e.kind));
   const connected = Object.values(workspace.agents).filter(agent => agent.signedIn).length;
+  const currentRoot = view === 'editing' ? studios.editing.root : view === 'faceless' ? studios.faceless.root : workspace.project;
+  const working = workspace.busy || studios.faceless.job.status === 'running';
 
   return <div className="desktop-shell">
     <div className="window-titlebar"><div className="window-title"><span className="mini-app-icon"><Columns2 size={11} /></span>codex x claude<span className="title-version">/ a shared workspace</span></div><div className="window-buttons"><button aria-label="Minimize" onClick={() => invoke(desktop.window('minimize'))}><Minus size={12} /></button><button aria-label="Maximize" onClick={() => invoke(desktop.window('maximize'))}><Square size={10} /></button><button className="close-window" aria-label="Close window" onClick={() => invoke(desktop.window('close'))}><X size={12} /></button></div></div>
-    <div className="browser-toolbar"><div className="toolbar-arrows"><button className="icon-button" title="Workspace" aria-label="Go to workspace" onClick={() => setView('workspace')}><ArrowRight size={17} className="back-arrow" /></button><button className="icon-button" title="Refresh connections" aria-label="Refresh connections" disabled={workspace.busy || refreshing} onClick={refresh}><RefreshCw size={14} className={refreshing ? 'spin' : ''} /></button></div><div className="address-bar"><ShieldCheck size={12} /><span>local://<b>codex-x-claude</b>/{workspace.project ? projectName(workspace.project) : 'workspace'}</span><span className="address-local">on your computer</span></div><button className="toolbar-github" aria-label="Open GitHub repository" title="GitHub repository" onClick={() => invoke(desktop.openLink('repository'))}><Github size={16} /></button><span className="toolbar-light amber" /><span className="toolbar-light mint">+</span></div>
+    <div className="browser-toolbar"><div className="toolbar-arrows"><button className="icon-button" title="Workspace" aria-label="Go to workspace" onClick={() => setView('workspace')}><ArrowRight size={17} className="back-arrow" /></button><button className="icon-button" title="Refresh connections" aria-label="Refresh connections" disabled={workspace.busy || refreshing} onClick={refresh}><RefreshCw size={14} className={refreshing ? 'spin' : ''} /></button></div><div className="address-bar"><ShieldCheck size={12} /><span>local://<b>codex-x-claude</b>/{creative ? view : workspace.project ? projectName(workspace.project) : 'workspace'}</span><span className="address-local">on your computer</span></div><button className="toolbar-github" aria-label="Open GitHub repository" title="GitHub repository" onClick={() => invoke(desktop.openLink('repository'))}><Github size={16} /></button><span className="toolbar-light amber" /><span className="toolbar-light mint">+</span></div>
+    <div className="workspace-tabs" role="tablist" aria-label="Workspace tabs" onKeyDown={event => {
+      const tabs = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('[role=tab]'));
+      const index = tabs.indexOf(document.activeElement as HTMLButtonElement);
+      const next = event.key === 'ArrowRight' ? (index + 1) % tabs.length : event.key === 'ArrowLeft' ? (index + tabs.length - 1) % tabs.length : event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : -1;
+      if (next >= 0) { event.preventDefault(); tabs[next].focus(); tabs[next].click(); }
+    }}>{(['workspace', 'editing', 'faceless'] as const).map((tab, index) => <button key={tab} id={`tab-${tab}`} role="tab" aria-controls="workspace-panel" aria-selected={tab === 'workspace' ? !creative : view === tab} tabIndex={(tab === 'workspace' ? !creative : view === tab) ? 0 : -1} className="workspace-tab" onClick={() => setView(tab)}>{tab === 'workspace' ? <Columns2 size={13} /> : tab === 'editing' ? <Clapperboard size={13} /> : <Video size={13} />}{tab === 'workspace' ? 'codex × claude' : tab}<span>0{index + 1}</span></button>)}</div>
     <div className="app-body">
       <aside className="sidebar">
         <button className="sidebar-brand" onClick={() => setView('workspace')}><span className="brand-symbol"><Columns2 size={23} /></span><span>better<br /><b>together.</b></span><span className="brand-star">✳</span></button>
         <div className="sidebar-section-label">YOUR LITTLE CORNER</div>
         <nav aria-label="Main navigation"><button className={view === 'workspace' ? 'nav-item active' : 'nav-item'} onClick={() => setView('workspace')}><Columns2 size={16} />workspace<span className="nav-key">1</span></button><button className={view === 'activity' ? 'nav-item active' : 'nav-item'} onClick={() => setView('activity')}><History size={16} />activity{activity.length > 0 && <span className="nav-count">{activity.length}</span>}</button><button className="nav-item" onClick={() => { setModal('changes'); refreshChanges(); }}><FileDiff size={16} />changes<span className="nav-count">{changed.files.length}</span></button></nav>
-        <div className="sidebar-divider" /><div className="sidebar-section-label">PROJECT</div>
+        <div className="sidebar-divider" />{creative ? <div className="studio-sidebar-note">{view === 'editing' ? <Clapperboard size={24} /> : <Video size={24} />}<b>{view === 'editing' ? 'a studio of its own.' : 'your next little film.'}</b>{view === 'editing' ? 'MotionKit has its own project and preview. Your coding chats stay in their workspace.' : 'Start with a topic. Local tools make the script, voice, captions and final video.'}</div> : <><div className="sidebar-section-label">PROJECT</div>
         <button className="project-button" disabled={workspace.busy} onClick={() => invoke(desktop.chooseProject())}><Folder size={17} /><span>{workspace.project ? projectName(workspace.project) : 'open a folder'}<small>{workspace.project ? 'local project' : 'make yourself at home'}</small></span><Plus size={13} /></button>
         <button className="new-session" disabled={workspace.busy} onClick={() => changeChat()}><Plus size={13} />new chat</button>
         <div className="chat-history"><div className="sidebar-section-label">SAVED CHATS <span>on this computer</span></div><nav aria-label="Saved chats">{workspace.chats.map(chat => <button key={chat.id} className={chat.id === workspace.activeChatId ? 'chat-item selected' : 'chat-item'} aria-current={chat.id === workspace.activeChatId ? 'page' : undefined} disabled={workspace.busy} title={chat.title} onClick={() => changeChat(chat.id)}><MessageSquare size={13} /><span><b>{chat.title}</b><small>{chat.messageCount ? new Date(chat.updatedAt).toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' · ' + chat.messageCount + (chat.messageCount === 1 ? ' task' : ' tasks') : 'a fresh page'}</small></span></button>)}</nav></div>
-        <div className="sidebar-bottom"><div className="connection-note"><div><span className={`tiny-dot ${connected ? 'green' : ''}`} /><span>{connected}/2 agents connected</span></div><button onClick={() => setModal('connections')}>manage connections<ArrowUpRight size={12} /></button></div><button className="nav-item" onClick={() => setModal('appearance')}><Palette size={16} />make it yours</button><button className="nav-item" onClick={() => setModal('connections')}><Settings2 size={16} />connections</button><div className="made-for-you"><Monitor size={12} />your machine. your rules.<span>♡</span></div></div>
+        </>}<div className="sidebar-bottom"><div className="connection-note"><div><span className={`tiny-dot ${connected ? 'green' : ''}`} /><span>{connected}/2 agents connected</span></div><button onClick={() => setModal('connections')}>manage connections<ArrowUpRight size={12} /></button></div><button className="nav-item" onClick={() => setModal('appearance')}><Palette size={16} />make it yours</button><button className="nav-item" onClick={() => setModal('connections')}><Settings2 size={16} />connections</button><div className="made-for-you"><Monitor size={12} />your machine. your rules.<span>♡</span></div></div>
       </aside>
-      <main className="workspace-main">
-        <header className="workspace-heading"><div className="heading-crumb"><span className="tiny-dot green" />{workspace.chats.find(chat => chat.id === workspace.activeChatId)?.title || 'a place to make things'}</div><div className="headline-row"><div className="headline"><Keycaps text="codex" /><span className="headline-cross">×</span><Keycaps text="claude" /></div><div className="heading-actions"><button className="bevel-button theme-toggle" aria-label="Dark mode" aria-pressed={workspace.appearance.theme === 'dark'} title={workspace.appearance.theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'} onClick={() => appearance({ theme: workspace.appearance.theme === 'dark' ? 'light' : 'dark' })}>{workspace.appearance.theme === 'dark' ? <Sun size={14} /> : <Moon size={14} />}<span>{workspace.appearance.theme === 'dark' ? 'light mode' : 'dark mode'}</span></button><button className="bevel-button open-project" disabled={workspace.busy} onClick={() => invoke(desktop.chooseProject())}><FolderOpen size={15} />{workspace.project ? 'switch project' : 'open project'}<ArrowUpRight size={13} /></button></div></div><div className="heading-subrow"><p>two minds. one workspace. whatever you’re imagining.</p><span className="version-badge">v0.1.2 <span>✧</span></span></div></header>
+      <main className={`workspace-main ${creative ? 'studio-pane' : ''}`} id="workspace-panel" role="tabpanel" aria-labelledby={`tab-${creative ? view : 'workspace'}`}>
+        {creative ? <StudioPage kind={view} state={studios} desktop={desktop} report={notify} update={setStudios} input={videoInput} setInput={setVideoInput} /> : <>
+        <header className="workspace-heading"><div className="heading-crumb"><span className="tiny-dot green" />{workspace.chats.find(chat => chat.id === workspace.activeChatId)?.title || 'a place to make things'}</div><div className="headline-row"><div className="headline"><Keycaps text="codex" /><span className="headline-cross">×</span><Keycaps text="claude" /></div><div className="heading-actions"><button className="bevel-button theme-toggle" aria-label="Dark mode" aria-pressed={workspace.appearance.theme === 'dark'} title={workspace.appearance.theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'} onClick={() => appearance({ theme: workspace.appearance.theme === 'dark' ? 'light' : 'dark' })}>{workspace.appearance.theme === 'dark' ? <Sun size={14} /> : <Moon size={14} />}<span>{workspace.appearance.theme === 'dark' ? 'light mode' : 'dark mode'}</span></button><button className="bevel-button open-project" disabled={workspace.busy} onClick={() => invoke(desktop.chooseProject())}><FolderOpen size={15} />{workspace.project ? 'switch project' : 'open project'}<ArrowUpRight size={13} /></button></div></div><div className="heading-subrow"><p>two minds. one workspace. whatever you’re imagining.</p><span className="version-badge">v0.2.0 <span>✧</span></span></div></header>
         {view === 'workspace' ? <>
           <div className="workspace-subbar"><div><Columns2 size={13} /><span>side by side</span><span className="subbar-separator">/</span><span className="muted">{workspace.project ? projectName(workspace.project) : 'a fresh start'}</span></div><button onClick={() => setModal('connections')}><Link2 size={13} />local accounts<ArrowUpRight size={12} /></button></div>
           <div className="agent-grid"><AgentPanel agent="codex" workspace={workspace} onConnect={() => setModal('connections')} onStop={() => invoke(desktop.stop('codex'))} /><div className="bridge-badge" title="Connected by your workspace"><Link2 size={15} /></div><AgentPanel agent="claude" workspace={workspace} onConnect={() => setModal('connections')} onStop={() => invoke(desktop.stop('claude'))} /></div>
@@ -162,9 +185,9 @@ function App() {
         </> : <section className="activity-page"><header><div><History size={20} /><h2>the whole picture.</h2></div><span>{activity.length} events</span></header><p className="activity-description">Tasks, tools, and handoffs, as they happen.</p>{activity.length ? <div className="activity-list">{activity.map(event => <div className={`activity-row ${event.kind}`} key={event.id}><span className="activity-time">{time(event.time)}</span><span className={`activity-agent ${event.agent}`}>{event.agent}</span><span className="activity-detail">{event.text}</span></div>)}</div> : <div className="activity-empty"><History size={37} strokeWidth={1} /><h3>every little step, right here.</h3><p>Send a task and watch the workspace come to life.</p></div>}</section>}
         <section className="composer"><div className="composer-heading"><Sparkles size={15} /><label htmlFor="task-prompt">what are we making?</label><span><kbd>ctrl</kbd><kbd>K</kbd></span></div><textarea ref={textarea} id="task-prompt" placeholder="An idea, a tricky bug, a ‘what if’…" value={prompt} onChange={event => setPrompt(event.target.value)} maxLength={32000} onKeyDown={event => { if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') { event.preventDefault(); submit(); } }} /><div className="composer-footer"><div className="composer-options"><div className="target-picker" aria-label="Choose agents">{(['both', 'codex', 'claude'] as const).map(agent => <button key={agent} aria-pressed={target === agent} className={target === agent ? 'selected' : ''} onClick={() => setTarget(agent)}>{agent === 'both' ? <><Columns2 size={12} />both</> : <><AgentMark agent={agent} size={13} />{agent}</>}</button>)}</div><span className="option-divider" /><label className="mode-picker"><select aria-label="Collaboration mode" value={mode} onChange={event => setMode(event.target.value as 'build' | 'compare')}><option value="build">{target === 'both' ? 'build + review' : 'build'}</option><option value="compare">{target === 'both' ? 'explore in parallel' : 'read-only explore'}</option></select><ChevronDown size={12} /></label></div>{workspace.busy ? <button className="bevel-button stop-button" onClick={() => invoke(desktop.stop())}><Square size={11} fill="currentColor" />stop working</button> : <button className="bevel-button send-button" disabled={!prompt.trim() || sending} onClick={submit}>{sending ? 'starting…' : 'let’s go'}<ArrowRight size={16} /></button>}</div></section>
         <div className="workspace-bottom"><button className="approval-toggle" aria-label="Auto-approve actions" aria-pressed={workspace.approvalMode === 'auto'} title="Automatically approve commands and edits for this chat until you switch chats or restart. Questions and browser sign-ins still need you." onClick={() => invoke(desktop.approvalMode(workspace.approvalMode === 'auto' ? 'ask' : 'auto'))}><ShieldCheck size={12} />{workspace.approvalMode === 'auto' ? 'auto-approve: on' : 'auto-approve: off'}<span className="mini-switch" /></button><span>{workspace.busy ? 'working on this subject…' : workspace.events.some(event => event.agent === 'you') ? <span>new subject? <button className="new-subject" onClick={() => changeChat()}>start a new chat ↗</button></span> : 'this chat saves automatically'}</span></div>
-      </main>
+      </>} </main>
     </div>
-    <footer className="window-statusbar"><span><span className={`tiny-dot ${workspace.busy ? 'amber' : 'green'}`} />{workspace.busy ? 'a little work in progress…' : 'all quiet. ready when you are.'}</span><span><GitBranch size={12} />{workspace.project ? projectName(workspace.project) : 'no project selected'}<span className="footer-divider" />built to be yours<ArrowUpRight size={11} /></span></footer>
+    <footer className="window-statusbar"><span><span className={`tiny-dot ${working ? 'amber' : 'green'}`} />{studios.faceless.job.status === 'running' ? 'your video is in production…' : workspace.busy ? 'a little work in progress…' : 'all quiet. ready when you are.'}</span><span><GitBranch size={12} />{currentRoot ? projectName(currentRoot) : creative ? view + ' studio' : 'no project selected'}<span className="footer-divider" />built to be yours<ArrowUpRight size={11} /></span></footer>
 
     {modal && <div className="modal-backdrop" onClick={() => setModal(null)}><section className={`retro-dialog ${modal === 'changes' ? 'wide' : ''}`} role="dialog" aria-modal="true" aria-labelledby="dialog-title" onClick={event => event.stopPropagation()}><header className="dialog-titlebar"><h2 id="dialog-title">{modal === 'connections' ? 'a few introductions.' : modal === 'appearance' ? 'make yourself at home.' : 'what’s changed.'}</h2><button className="close-window" aria-label="Close dialog" onClick={() => setModal(null)}><X size={14} /></button></header><div className="dialog-content">
       {modal === 'connections' && <><p className="dialog-intro">Your local agents. Your existing accounts.<br /><span>No API keys to paste here.</span></p>{(['codex', 'claude'] as const).map(agent => <div className="connection-card" key={agent}><div className="connection-card-title"><span className={`agent-avatar ${agent}`}><AgentMark agent={agent} /></span><div><h3>{NAMES[agent]}{agent === 'claude' && ' Code'}</h3><p>{workspace.agents[agent].signedIn ? 'signed in · ready to work' : workspace.agents[agent].installed ? 'installed · sign-in needed' : 'not installed yet'}</p></div><i className={`connection-led ${workspace.agents[agent].signedIn ? 'on' : ''}`} /></div><div className="connection-card-actions">{workspace.agents[agent].installed ? <button className="bevel-button" disabled={workspace.busy} onClick={async () => { const result = await invoke(desktop.signIn(agent)); if (result) notify(result); }}><Link2 size={13} />{workspace.agents[agent].signedIn ? 'sign in again' : 'sign in'}<ArrowUpRight size={12} /></button> : <button className="bevel-button" onClick={() => invoke(desktop.openLink(agent))}>installation guide<ExternalLink size={12} /></button>}<span>{workspace.agents[agent].version || (agent === 'claude' ? 'uses your Claude plan' : 'uses your ChatGPT plan')}</span></div></div>)}<div className="connection-help"><CircleHelp size={16} /><p>Sign-in opens the agent’s own terminal and browser. After you finish, refresh below. Your plan’s access and limits apply.</p></div><button className="bevel-button refresh-button" disabled={refreshing || workspace.busy} onClick={refresh}><RefreshCw size={14} className={refreshing ? 'spin' : ''} />{refreshing ? 'checking…' : 'refresh connections'}</button></>}
