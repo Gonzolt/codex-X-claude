@@ -6,14 +6,19 @@ const { validateInput, automaticConsent } = require('./inputs.cjs');
 const { LINES } = require('./activity.cjs');
 
 class Coordinator extends EventEmitter {
+  static launch(initial = {}, dependencies = {}) {
+    const coordinator = new Coordinator(initial, dependencies);
+    if (initial.chats?.length || initial.events?.length) coordinator.fresh();
+    return coordinator;
+  }
   constructor(initial = {}, dependencies = {}) {
     super();
-    this.chats = Array.isArray(initial.chats) ? initial.chats.filter(chat => chat && typeof chat.id === 'string' && Array.isArray(chat.events)).map(chat => ({ ...chat, events: chat.events.slice(-500).map(event => ({ ...event, streaming: false })), sessions: chat.sessions || {} })) : [];
+    this.chats = Array.isArray(initial.chats) ? initial.chats.filter(chat => chat && typeof chat.id === 'string' && Array.isArray(chat.events)).map(chat => ({ ...chat, draft: typeof chat.draft === 'string' ? chat.draft.slice(0, 32000) : '', events: chat.events.slice(-500).map(event => ({ ...event, streaming: false })), sessions: chat.sessions || {} })) : [];
     if (!this.chats.length) this.chats.push({ id: randomUUID(), title: 'New chat', project: initial.project || null, events: (initial.events || []).slice(-500).map(event => ({ ...event, streaming: false })), updatedAt: Date.now(), sessions: {} });
     const active = this.chats.find(chat => chat.id === initial.activeChatId) || this.chats[0];
     for (const chat of this.chats) if (chat.title === 'New chat') chat.title = chat.events.find(event => event.agent === 'you')?.text.split('\n')[0].slice(0, 65) || 'New chat';
     this.state = {
-      project: active.project || null, events: active.events,
+      project: active.project || null, events: active.events, draft: active.draft || '',
       activeChatId: active.id, chats: [], activity: { codex: null, claude: null },
       appearance: { accent: 'mint', theme: 'light', pattern: true, fontSize: 14, ...(initial.appearance || {}) },
       agents: { codex: { installed: false, signedIn: false }, claude: { installed: false, signedIn: false } },
@@ -26,7 +31,7 @@ class Coordinator extends EventEmitter {
   }
   checkpoint() {
     const chat = this.chats.find(chat => chat.id === this.state.activeChatId);
-    chat.project = this.state.project; chat.events = this.state.events;
+    chat.project = this.state.project; chat.events = this.state.events; chat.draft = this.state.draft;
     for (const [name, client] of Object.entries(this.clients)) {
       const session = client.exportSession?.();
       if (session) chat.sessions[name] = session;
@@ -71,7 +76,7 @@ class Coordinator extends EventEmitter {
   fresh() {
     if (this.state.busy) throw new Error('Wait for the current task before starting a new chat.');
     this.closeClients();
-    const chat = { id: randomUUID(), title: 'New chat', project: this.state.project, events: [], updatedAt: Date.now(), sessions: {} };
+    const chat = { id: randomUUID(), title: 'New chat', project: this.state.project, draft: '', events: [], updatedAt: Date.now(), sessions: {} };
     this.chats.push(chat); this.loadChat(chat); return this.state;
   }
   selectChat(id) {
@@ -81,9 +86,17 @@ class Coordinator extends EventEmitter {
     this.closeClients(); this.loadChat(chat); return this.state;
   }
   loadChat(chat) {
-    this.state.activeChatId = chat.id; this.state.project = chat.project; this.state.events = chat.events;
+    this.state.activeChatId = chat.id; this.state.project = chat.project; this.state.events = chat.events; this.state.draft = chat.draft || '';
     this.state.approvalMode = 'ask'; this.state.reviewPass = 0; this.state.activity = { codex: null, claude: null };
     this.state.status = { codex: 'idle', claude: 'idle' }; this.cancelled = false; this.cancelledAgents.clear(); this.publish();
+  }
+  setDraft(id, value) {
+    if (typeof value !== 'string' || value.length > 32000) throw new Error('Keep the draft under 32,000 characters.');
+    const chat = this.chats.find(item => item.id === id);
+    if (!chat) throw new Error('This saved chat could not be found.');
+    chat.draft = value;
+    if (id === this.state.activeChatId) this.state.draft = value;
+    this.publish();
   }
   setApprovalMode(mode) {
     if (!['ask', 'auto'].includes(mode)) throw new Error('Choose ask or auto approval.');
@@ -164,6 +177,7 @@ class Coordinator extends EventEmitter {
     this.state.busy = true; this.cancelled = false; this.cancelledAgents.clear();
     this.state.status = { codex: 'idle', claude: 'idle' };
     this.state.reviewPass = 0;
+    this.state.draft = '';
     this.event('you', task.prompt, 'prompt');
     const generation = ++this.generation;
     // Keep IPC responsive while the agents work and approvals are pending.

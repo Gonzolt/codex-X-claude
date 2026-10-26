@@ -5,12 +5,14 @@ const path = require('node:path');
 const { Coordinator } = require('./coordinator.cjs');
 const { changes, fileDiff } = require('./workspace.cjs');
 const { Studios } = require('./studios.cjs');
+const { WorkspaceStore } = require('./persistence.cjs');
 
-let win, coordinator, studios, store, saveTimer, publishTimer, closing = false;
-let saveQueue = Promise.resolve();
+let win, coordinator, studios, store, persistence, saveTimer, publishTimer, closing = false;
 const dev = process.argv.includes('--dev');
 const headlessTest = process.argv.includes('--headless-test');
 if (headlessTest && process.env.CXC_TEST_USER_DATA) app.setPath('userData', process.env.CXC_TEST_USER_DATA);
+const primaryInstance = headlessTest || app.requestSingleInstanceLock();
+if (!primaryInstance) app.quit();
 const links = {
   repository: 'https://github.com/Gonzolt/codex-X-claude',
   codex: 'https://developers.openai.com/codex/cli',
@@ -19,21 +21,40 @@ const links = {
 };
 
 function save() {
-  if (!coordinator || !store) return Promise.resolve();
-  const value = JSON.stringify({ ...coordinator.serialize(), studios: studios?.serialize() });
-  saveQueue = saveQueue.catch(() => {}).then(async () => {
-    try {
-      await fs.writeFile(store + '.tmp', value);
-      await fs.rename(store + '.tmp', store);
-    } catch (error) { console.error('Could not save workspace:', error.message); }
-  });
-  return saveQueue;
+  if (!coordinator || !persistence) return Promise.resolve();
+  return persistence.save({ ...coordinator.serialize(), studios: studios?.serialize() });
 }
+
+function scheduleSave() {
+  clearTimeout(saveTimer);
+  if (!closing) saveTimer = setTimeout(() => save().catch(error => console.error('Could not autosave workspace:', error.message)), 700);
+}
+
+async function captureDraft() {
+  if (!win || win.isDestroyed() || win.webContents.isDestroyed()) return;
+  let timer;
+  const pending = win.webContents.executeJavaScript('(() => { const input = document.getElementById("task-prompt"); return input ? { id: input.dataset.chatId, value: input.value } : null; })()').catch(() => undefined);
+  const value = await Promise.race([pending, new Promise(resolve => { timer = setTimeout(resolve, 1500); })]);
+  clearTimeout(timer);
+  if (typeof value?.value === 'string' && coordinator.chats.some(chat => chat.id === value.id)) coordinator.setDraft(value.id, value.value);
+}
+
+app.on('second-instance', async () => {
+  if (!win || win.isDestroyed()) return;
+  if (win.isMinimized()) win.restore(); win.show(); win.focus();
+  if (closing) return;
+  if (coordinator.state.busy) { coordinator.event('system', 'Finish or stop the current task before opening a new chat.', 'notice'); return; }
+  try { await captureDraft(); coordinator.fresh(); }
+  catch (error) { console.error('Could not start a fresh chat:', error.message); }
+});
 
 function registerHandlers() {
   const handle = (channel, fn) => ipcMain.handle(channel, async (event, ...args) => {
     if (event.sender !== win?.webContents || event.senderFrame !== win.webContents.mainFrame) throw new Error('Unknown sender.');
-    try { return { ok: true, value: await fn(...args) }; }
+    try {
+      if (closing && !['workspace:state', 'studios:state', 'workspace:draft', 'app:window'].includes(channel)) throw new Error('The workspace is saving and closing.');
+      return { ok: true, value: await fn(...args) };
+    }
     catch (error) { return { ok: false, error: error.message }; }
   });
   handle('workspace:state', () => coordinator.state);
@@ -48,6 +69,7 @@ function registerHandlers() {
   });
   handle('workspace:fresh', () => coordinator.fresh());
   handle('workspace:chat', id => coordinator.selectChat(id));
+  handle('workspace:draft', (id, value) => coordinator.setDraft(id, value));
   handle('agents:approvalMode', mode => coordinator.setApprovalMode(mode));
   handle('agents:refresh', () => coordinator.refresh());
   handle('agents:start', task => coordinator.start(task));
@@ -111,13 +133,17 @@ function registerHandlers() {
 }
 
 app.whenReady().then(async () => {
+  if (!primaryInstance) return;
   store = path.join(app.getPath('userData'), 'workspace.json');
+  persistence = new WorkspaceStore(store);
   let initial = {};
   try { initial = JSON.parse(await fs.readFile(store, 'utf8')); } catch {}
   if (initial.project) try { if (!(await fs.stat(initial.project)).isDirectory()) initial.project = null; } catch { initial.project = null; }
-  coordinator = new Coordinator(initial);
+  coordinator = Coordinator.launch(initial);
   studios = new Studios({ ...initial.studios, faceless: initial.studios?.faceless || process.env.CXC_FACELESS_ROOT || path.resolve(__dirname, '../..') });
   await studios.initialize();
+  let initialSaveError;
+  await save().catch(error => { initialSaveError = error; });
   win = new BrowserWindow({
     width: 1440, height: 1000, minWidth: 940, minHeight: 740,
     title: 'Codex x Claude', icon: path.join(__dirname, '../build/icon.png'), frame: false, backgroundColor: '#eef4f4', show: !headlessTest,
@@ -128,26 +154,39 @@ app.whenReady().then(async () => {
       publishTimer = null;
       if (!win.isDestroyed()) win.webContents.send('workspace:update', coordinator.state);
     }, 35);
-    clearTimeout(saveTimer); saveTimer = setTimeout(save, 700);
+    scheduleSave();
   });
   studios.on('state', () => {
     if (!win.isDestroyed()) win.webContents.send('studios:update', studios.state);
-    clearTimeout(saveTimer); saveTimer = setTimeout(save, 700);
+    scheduleSave();
   });
   registerHandlers();
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.webContents.on('will-navigate', event => event.preventDefault());
   win.on('close', event => {
-    if (closing) return;
+    if (closing) { event.preventDefault(); return; }
     if (coordinator.state.busy || studios.child || studios.starting) {
       const choice = dialog.showMessageBoxSync(win, { type: 'question', buttons: ['Keep working', 'Stop and close'], defaultId: 0, cancelId: 0, message: 'Work is still running.', detail: 'Closing stops the current agents and video generation.' });
       if (choice === 0) { event.preventDefault(); return; }
     }
-    event.preventDefault(); closing = true;
-    coordinator.close(); clearTimeout(saveTimer); clearTimeout(publishTimer);
-    studios.close().catch(error => console.error('Could not stop studio:', error.message)).then(save).finally(() => { if (!win.isDestroyed()) win.destroy(); });
+    event.preventDefault(); closing = true; win.setEnabled(false);
+    (async () => {
+      try {
+        await captureDraft(); coordinator.close();
+        clearTimeout(saveTimer); clearTimeout(publishTimer);
+        await studios.stopFaceless();
+        await save();
+        await studios.close();
+        if (!win.isDestroyed()) win.destroy();
+      } catch (error) {
+        closing = false; win.setEnabled(true); scheduleSave();
+        const choice = dialog.showMessageBoxSync(win, { type: 'error', buttons: ['Retry save and close', 'Keep app open'], defaultId: 0, cancelId: 1, message: 'Your chat could not be saved. The app is staying open.', detail: error.message });
+        if (choice === 0) win.close();
+      }
+    })();
   });
   if (dev) await win.loadURL('http://127.0.0.1:5173'); else await win.loadFile(path.join(__dirname, '../dist/index.html'));
+  if (initialSaveError) coordinator.event('system', `Autosave is unavailable: ${initialSaveError.message}. The app will stay open if saving fails when you close.`, 'error');
   coordinator.refresh().catch(error => coordinator.event('system', error.message, 'error'));
 });
 
