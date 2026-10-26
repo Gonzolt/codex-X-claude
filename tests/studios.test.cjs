@@ -93,7 +93,7 @@ test('completed video and credits are available only after READY_FOR_REVIEW', as
   assert.equal(studios.state.faceless.job.status, 'done'); assert.equal(await studios.outputPath('output'), output);
   await fs.writeFile(path.join(output, 'status.txt'), 'FAILED');
   await assert.rejects(studios.outputPath('video'), /has not finished/);
-  assert.deepEqual(studios.serialize(), { editing: null, faceless: root });
+  assert.deepEqual(studios.serialize(), { editing: null, faceless: root, exports: null });
 });
 async function motionkit(root) {
   await fs.mkdir(path.join(root, 'brands/lab/films'), { recursive: true });
@@ -155,4 +155,23 @@ test('the managed MotionKit pulls only when it has no local edits', async t => {
   assert.deepEqual(calls.map(call => call.args[0]), ['status']);
   dirty = ''; await studios.updateMotionKit();
   assert.deepEqual(calls.map(call => call.args[0]), ['status', 'status', 'pull']);
+});
+test('the export folder is chosen, kept across MotionKit changes, saved and reset', async t => {
+  const root = await folder(t), kit = path.join(root, 'kit'), exports = path.join(root, 'My Exports');
+  await motionkit(kit); await fs.mkdir(exports);
+  const studios = new Studios(); t.after(() => studios.close());
+  await studios.configure('editing', kit);
+  assert.equal(await studios.openPath('editing', 'exports'), path.join(await fs.realpath(kit), 'out'), 'default is out/, created on demand');
+  assert.ok((await fs.stat(path.join(kit, 'out'))).isDirectory());
+  await studios.setExportDir(exports);
+  assert.equal(await studios.openPath('editing', 'exports'), await fs.realpath(exports));
+  await studios.configure('editing', kit);
+  assert.equal(studios.state.editing.exportDir, await fs.realpath(exports), 'reconnecting MotionKit keeps the choice');
+  const saved = studios.serialize(); assert.equal(saved.exports, await fs.realpath(exports));
+  const restored = new Studios(saved); t.after(() => restored.close()); await restored.initialize();
+  assert.equal(restored.state.editing.exportDir, await fs.realpath(exports));
+  await assert.rejects(studios.setExportDir(path.join(root, 'missing')));
+  await studios.setExportDir(null); assert.equal(studios.serialize().exports, null);
+  const gone = new Studios({ ...saved, exports: path.join(root, 'removed') }); t.after(() => gone.close()); await gone.initialize();
+  assert.equal(gone.state.editing.exportDir, null, 'a missing folder falls back to out/');
 });

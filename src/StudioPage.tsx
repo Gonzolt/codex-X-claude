@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { ReactNode } from 'react';
-import { ArrowRight, ArrowUpRight, Check, Clapperboard, Download, ExternalLink, Film, FolderOpen, Play, RefreshCw, Sparkles, Square, Video } from 'lucide-react';
+import { ArrowRight, ArrowUpRight, Check, Clapperboard, Download, ExternalLink, Film, FolderOpen, FolderOutput, Play, RefreshCw, RotateCcw, Sparkles, Square, Video } from 'lucide-react';
 import type { Desktop, Result, StudioKind, Studios, VideoInput } from './types';
 import './studios.css';
 
@@ -32,6 +32,12 @@ export function StudioPage({ kind, state, desktop, report, update, input, setInp
     setPending(false);
   }
   const installing = editing && !!state.editing.installing;
+  async function exportFolder(action: 'choose' | 'reset') {
+    setPending(true);
+    const next = await perform(desktop.exportFolder(action));
+    if (next) update(next);
+    setPending(false);
+  }
   async function generate() {
     if (pending || running) return;
     setPending(true); const next = await perform(desktop.runFaceless(input));
@@ -48,6 +54,13 @@ export function StudioPage({ kind, state, desktop, report, update, input, setInp
           <button className="bevel-button" disabled={pending || installing || (editing ? editorBusy : running)} onClick={choose}><FolderOpen size={13} />{pending && !installing ? 'opening…' : root ? 'change folder' : 'choose folder'}</button>
         </div>
       </section>
+      {editing && root && <section className="studio-location export-location"><div className="studio-location-label"><FolderOutput size={17} /><div><b>where exports go</b><span title={state.editing.exportDir || undefined}>{state.editing.exportDir || 'MotionKit’s out/ folder (default). Choose any folder for finished videos.'}</span></div></div>
+        <div className="studio-location-actions">
+          <button className="bevel-button" onClick={() => perform(desktop.openStudio('editing', 'exports'))}><ArrowUpRight size={13} />open</button>
+          {state.editing.exportDir && <button className="bevel-button" disabled={pending || editorBusy} title="Use MotionKit’s out/ folder again" onClick={() => exportFolder('reset')}><RotateCcw size={13} />default</button>}
+          <button className="bevel-button" disabled={pending || editorBusy} onClick={() => exportFolder('choose')}><FolderOpen size={13} />{state.editing.exportDir ? 'change folder' : 'choose folder'}</button>
+        </div>
+      </section>}
       {editing ? <>
         <div className="motion-edit-layout">
         <section className="motion-workbench"><div className="motion-stage" aria-hidden="true"><div className="motion-grid" /><span className="motion-guide horizontal" /><span className="motion-guide vertical" /><span className="motion-corner top" /><span className="motion-corner bottom" /><div className="motion-word"><span>make</span><b>it move.</b></div><span className="motion-timecode">00:00:00 / your next idea</span><span className="motion-spark">✳</span></div>

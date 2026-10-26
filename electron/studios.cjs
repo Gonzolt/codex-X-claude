@@ -30,15 +30,16 @@ async function discoverFilms(root) {
 class Studios extends EventEmitter {
   constructor(initial = {}, dependencies = {}) {
     super(); this.dependencies = dependencies;
-    this.state = { editing: { root: null, films: [] }, faceless: { root: null, job: emptyJob() } };
+    this.state = { editing: { root: null, films: [], exportDir: null }, faceless: { root: null, job: emptyJob() } };
     this.initial = initial; this.child = null; this.server = null;
   }
   publish() { this.emit('state', this.state); }
-  serialize() { return { editing: this.state.editing.root, faceless: this.state.faceless.root }; }
+  serialize() { return { editing: this.state.editing.root, faceless: this.state.faceless.root, exports: this.state.editing.exportDir }; }
   async initialize() {
     for (const kind of ['editing', 'faceless']) if (typeof this.initial[kind] === 'string') {
       try { await this.configure(kind, this.initial[kind]); } catch { /* A moved installation can be selected again. */ }
     }
+    if (typeof this.initial.exports === 'string') await this.setExportDir(this.initial.exports).catch(() => { /* a removed drive falls back to out/ */ });
   }
   async configure(kind, folder) {
     if (!['editing', 'faceless'].includes(kind)) throw new Error('Unknown studio.');
@@ -49,7 +50,7 @@ class Studios extends EventEmitter {
       try { manifest = JSON.parse(await fs.readFile(path.join(root, 'package.json'), 'utf8')); } catch {}
       if (manifest?.name !== 'motionkit') throw new Error('Choose the standalone MotionKit folder containing its package.json.');
       const films = await discoverFilms(root);
-      this.closePreview(); this.state.editing = { root, films };
+      this.closePreview(); this.state.editing = { root, films, exportDir: this.state.editing.exportDir };
     } else {
       for (const file of ['automatic.py', 'make_video.py', 'workflow.py', 'commons_footage.py']) {
         if (!(await fs.stat(path.join(root, file)).catch(() => null))?.isFile()) throw new Error('Choose the faceless workflow folder containing automatic.py and commons_footage.py.');
@@ -57,6 +58,23 @@ class Studios extends EventEmitter {
       this.state.faceless = { root, job: emptyJob() };
     }
     this.publish(); return this.state;
+  }
+  // Where finished exports go. null keeps MotionKit's own out/ folder.
+  async setExportDir(folder) {
+    if (folder === null) this.state.editing.exportDir = null;
+    else {
+      const dir = await fs.realpath(folder);
+      if (!(await fs.stat(dir)).isDirectory()) throw new Error('Choose a folder for your exports.');
+      this.state.editing.exportDir = dir;
+    }
+    this.publish(); return this.state;
+  }
+  async exportPath() {
+    const { root, exportDir } = this.state.editing;
+    if (exportDir) return exportDir;
+    if (!root) throw new Error('Select your standalone MotionKit folder first.');
+    const out = path.join(await fs.realpath(root), 'out');
+    await fs.mkdir(out, { recursive: true }); return out;
   }
   async refreshFilms() {
     const root = this.state.editing.root;
@@ -141,6 +159,7 @@ class Studios extends EventEmitter {
   async openPath(kind, target) {
     if (!['editing', 'faceless'].includes(kind)) throw new Error('Unknown studio.');
     if (kind === 'faceless' && ['video', 'output'].includes(target)) return this.outputPath(target);
+    if (kind === 'editing' && target === 'exports') return this.exportPath();
     if (target !== 'root' || !this.state[kind].root) throw new Error('Select the studio folder first.');
     return fs.realpath(this.state[kind].root);
   }

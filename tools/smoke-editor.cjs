@@ -58,6 +58,12 @@ async function main() {
   if (await js('Boolean(document.getElementById("edit-prompt"))')) { assert.match(await blocked(), /Get MotionKit/); assert.equal(await sendable(), false); }
   await ipc('chooseStudio', 'editing'); await pause(150);
   await waitFor(() => js('Boolean(document.getElementById("edit-prompt"))'));
+  const exportLabel = () => js('document.querySelector(".export-location span")?.textContent || ""');
+  assert.match(await exportLabel(), /out\/ folder/);
+  await ipc('exportFolder', 'choose'); await pause(100); // the stubbed dialog answers with the fixture folder
+  assert.equal(await exportLabel(), await fs.realpath(motion));
+  await ipc('exportFolder', 'reset'); await pause(100);
+  assert.match(await exportLabel(), /out\/ folder/);
   await type(''); await pause(50);
   assert.match(await blocked(), /Describe the change/); assert.equal(await sendable(), false);
   await type('My unsent editing prompt'); await pause(50);

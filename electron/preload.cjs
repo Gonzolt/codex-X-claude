@@ -35,6 +35,7 @@ contextBridge.exposeInMainWorld('desktop', {
   },
   chooseStudio: kind => ipcRenderer.invoke('studios:choose', kind),
   installMotionKit: () => ipcRenderer.invoke('studios:install'),
+  exportFolder: action => ipcRenderer.invoke('studios:exports', action),
   previewMotion: id => ipcRenderer.invoke('studios:preview', id),
   openStudio: (kind, target) => ipcRenderer.invoke('studios:open', kind, target),
   runFaceless: input => ipcRenderer.invoke('studios:run', input),

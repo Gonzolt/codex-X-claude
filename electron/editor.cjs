@@ -1,5 +1,6 @@
 const { EventEmitter } = require('node:events');
 const { Coordinator } = require('./coordinator.cjs');
+const path = require('node:path');
 const { assertTask } = require('./protocol.cjs');
 
 class MotionEditor extends EventEmitter {
@@ -26,7 +27,7 @@ class MotionEditor extends EventEmitter {
   async start(input, studios, coding) {
     if (coding.state.busy) throw new Error('Finish or stop the coding task before starting an edit.');
     const task = assertTask({ ...input, mode: 'build' });
-    const { root, films } = studios.state.editing;
+    const { root, films, exportDir } = studios.state.editing;
     if (!root) throw new Error('Select your standalone MotionKit folder first.');
     const film = input.film || null;
     if (film && !films.some(item => item.id === film)) throw new Error('Choose a film from the selected MotionKit project.');
@@ -38,6 +39,7 @@ class MotionEditor extends EventEmitter {
       'Read README.md and applicable project instructions before editing. Work in the actual MotionKit files, not the Codex x Claude application.',
       'Preserve deterministic render(t), theme tokens and voice/scene timing where relevant. Inspect dependencies before using the project preview or export commands; follow its Windows/WSL instructions.',
       'Make the requested changes, run relevant checks and report the files changed and how to preview the result. Do not claim an export succeeded unless it actually ran.',
+      exportDir ? `Save every finished export (video, GIF or still you hand over) in the user's export folder: ${exportDir}. Pass the full path, e.g. node tools/export.mjs --film <brand>/<film> --out "${path.join(exportDir, '<film>.mp4')}". Keep scratch renders, strips and contact sheets out of it.` : 'Save finished exports in the project out/ folder (the default of tools/export.mjs).',
       'Use existing assets and free local tools. Do not purchase, upload, publish, or call paid generation/voice services without an explicit user request.',
       '\nUSER EDITING REQUEST:\n'
     ].join('\n');

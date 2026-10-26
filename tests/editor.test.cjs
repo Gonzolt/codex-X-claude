@@ -1,4 +1,5 @@
 const { test } = require('node:test');
+const path = require('node:path');
 const assert = require('node:assert/strict');
 const { MotionEditor } = require('../electron/editor.cjs');
 const { Coordinator } = require('../electron/coordinator.cjs');
@@ -56,4 +57,14 @@ test('editing approval and draft state stay separate from coding permissions and
   const reopened = new MotionEditor(saved); reopened.select(editor.state.activeChatId, '/motionkit');
   assert.equal(reopened.state.draft, 'Unsent edit');
   assert.throws(() => reopened.select(editor.state.activeChatId, '/different'), /selected MotionKit/);
+});
+test('edits tell the agent where finished exports go', async () => {
+  const { coding, studios, editor, calls } = fixture();
+  await editor.start({ prompt: 'Export it', target: 'claude', film: 'lab/demo' }, studios, coding); await editor.coordinator.current;
+  assert.match(calls[0].prompt, /out\/ folder/);
+  const dir = path.join(path.parse(process.cwd()).root, 'My Videos', 'exports');
+  studios.state.editing.exportDir = dir;
+  await editor.start({ prompt: 'Export it again', target: 'claude', film: 'lab/demo' }, studios, coding); await editor.coordinator.current;
+  assert.ok(calls[1].prompt.includes(`export folder: ${dir}.`));
+  assert.ok(calls[1].prompt.includes(`--out "${path.join(dir, '<film>.mp4')}"`));
 });

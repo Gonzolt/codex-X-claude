@@ -127,6 +127,13 @@ function registerHandlers() {
       return studios.state;
     } finally { editingChoosing = false; }
   });
+  handle('studios:exports', async action => {
+    if (!['choose', 'reset'].includes(action)) throw new Error('Unknown export folder action.');
+    if (editor.state.busy) throw new Error('Finish or stop the edit before changing the export folder.');
+    if (action === 'reset') return studios.setExportDir(null);
+    const result = await dialog.showOpenDialog(win, { title: 'Choose where finished MotionKit exports go', defaultPath: studios.state.editing.exportDir || undefined, properties: ['openDirectory', 'createDirectory'] });
+    return result.canceled ? studios.state : studios.setExportDir(result.filePaths[0]);
+  });
   handle('studios:films', () => studios.refreshFilms());
   handle('editing:state', () => editor.state);
   handle('editing:start', input => {
