@@ -13,6 +13,11 @@ export function EditingChat({ workspace, desktop, root, film, prompt, setPrompt,
   useEffect(() => { if (following.current && feed.current) feed.current.scrollTop = feed.current.scrollHeight; }, [workspace.events]);
   useEffect(() => { following.current = true; }, [workspace.activeChatId]);
   const chats = workspace.chats.filter(chat => chat.project === root);
+  // Why "make the edit" is off, in the order the user has to fix it; null when it can be pressed.
+  const blocked = !root ? 'Choose your MotionKit folder above to start editing.'
+    : codingBusy ? 'Finish the coding task before sending an edit.'
+    : !prompt.trim() ? 'Describe the change above to make the edit.'
+    : null;
   async function perform<T,>(action: Promise<Result<T>>) {
     try { const result = await action; if (!result.ok) { report(result.error); return; } return result.value; }
     catch (error) { report(error instanceof Error ? error.message : 'Could not complete this edit.'); }
@@ -40,8 +45,9 @@ export function EditingChat({ workspace, desktop, root, film, prompt, setPrompt,
       <label htmlFor="edit-prompt">what would you like to change?</label>
       <textarea id="edit-prompt" data-chat-id={workspace.activeChatId} aria-label="Editing prompt" value={prompt} maxLength={32000} disabled={pending} placeholder="Make the opening faster and give the final line a little more room…" onChange={event => setPrompt(event.target.value)} onKeyDown={event => { if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') { event.preventDefault(); submit(); } }} />
       <div className="editing-targets" aria-label="Choose editing agents">{(['codex', 'claude', 'both'] as const).map(agent => <button type="button" key={agent} aria-pressed={target === agent} disabled={pending || workspace.busy} onClick={() => setTarget(agent)}>{target === agent && <Check size={11} />}{agent === 'codex' ? 'ChatGPT / Codex' : agent === 'claude' ? 'Claude' : 'both'}</button>)}</div>
-      <p className="editing-mode-help">{target === 'both' ? 'Codex edits. Claude reviews and asks for fixes.' : target === 'codex' ? 'Uses your existing local Codex connection.' : 'Claude edits the selected MotionKit project.'}{codingBusy && ' Finish the coding task before sending an edit.'}</p>
-      <div className="editing-send-row"><button type="button" className="editing-consent" aria-label="Auto-approve editing actions" aria-pressed={workspace.approvalMode === 'auto'} onClick={() => perform(desktop.editApprovalMode(workspace.approvalMode === 'auto' ? 'ask' : 'auto'))}><ShieldCheck size={12} />{workspace.approvalMode === 'auto' ? 'auto-approve on' : 'ask before actions'}</button>{workspace.busy ? <button type="button" className="bevel-button stop-button" onClick={() => perform(desktop.stopEdit())}><Square size={11} fill="currentColor" />stop edit</button> : <button type="submit" className="bevel-button studio-primary" disabled={!root || !prompt.trim() || pending || codingBusy}>{pending ? 'starting…' : 'make the edit'}<ArrowRight size={14} /></button>}</div>
+      <p className="editing-mode-help">{target === 'both' ? 'Codex edits. Claude reviews and asks for fixes.' : target === 'codex' ? 'Uses your existing local Codex connection.' : 'Claude edits the selected MotionKit project.'}</p>
+      <div className="editing-send-row"><button type="button" className="editing-consent" aria-label="Auto-approve editing actions" aria-pressed={workspace.approvalMode === 'auto'} onClick={() => perform(desktop.editApprovalMode(workspace.approvalMode === 'auto' ? 'ask' : 'auto'))}><ShieldCheck size={12} />{workspace.approvalMode === 'auto' ? 'auto-approve on' : 'ask before actions'}</button>{workspace.busy ? <button type="button" className="bevel-button stop-button" onClick={() => perform(desktop.stopEdit())}><Square size={11} fill="currentColor" />stop edit</button> : <button type="submit" className="bevel-button studio-primary" disabled={!!blocked || pending} title={blocked || undefined} aria-describedby={blocked ? 'edit-blocked' : undefined}>{pending ? 'starting…' : 'make the edit'}<ArrowRight size={14} /></button>}</div>
+      {blocked && !workspace.busy && !pending && <p id="edit-blocked" className="editing-blocked" role="status">{blocked}</p>}
     </form>
   </section>;
 }

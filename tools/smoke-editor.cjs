@@ -52,9 +52,17 @@ async function main() {
   await waitFor(() => { win = BrowserWindow.getAllWindows()[0]; return win && !win.webContents.isLoading() && win.webContents.getURL().startsWith('file:'); });
   await waitFor(() => js('Boolean(window.desktop && document.getElementById("tab-editing"))'));
   await waitFor(async () => (await ipc('getState')).agents.claude.installed);
-  await tab('editing'); await ipc('chooseStudio', 'editing'); await pause(150);
+  const blocked = () => js('document.getElementById("edit-blocked")?.textContent || ""');
+  const sendable = () => js('Boolean(document.querySelector(".editing-prompt-form [type=submit]:not(:disabled)"))');
+  await tab('editing');
+  if (await js('Boolean(document.getElementById("edit-prompt"))')) { assert.match(await blocked(), /MotionKit folder/); assert.equal(await sendable(), false); }
+  await ipc('chooseStudio', 'editing'); await pause(150);
   await waitFor(() => js('Boolean(document.getElementById("edit-prompt"))'));
-  await type('My unsent editing prompt'); await tab('faceless'); await tab('editing');
+  await type(''); await pause(50);
+  assert.match(await blocked(), /Describe the change/); assert.equal(await sendable(), false);
+  await type('My unsent editing prompt'); await pause(50);
+  assert.equal(await blocked(), ''); assert.equal(await sendable(), true);
+  await tab('faceless'); await tab('editing');
   assert.equal(await js('document.getElementById("edit-prompt").value'), 'My unsent editing prompt');
   const initialCoding = await ipc('getState');
   for (const target of ['codex', 'claude', 'both']) {
