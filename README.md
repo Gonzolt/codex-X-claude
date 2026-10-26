@@ -43,9 +43,13 @@ Small live status lines describe thinking, reading, researching, editing, using 
 
 ## Saved chats
 
+Every launch starts a fresh empty chat. Previous chats stay in the sidebar, with their messages, project and native sessions intact. Unsent chat drafts save automatically too; reopening an older chat restores its draft. Your last project stays selected for the new chat.
+
+Closing waits for the final save, including the latest text in the composer. A second close cannot bypass that save. If writing fails, the window stays open and offers a retry. Opening the program again while it is already running brings the existing window forward and starts a new chat when no coding task is active; it does not start a second writer against the same history file.
+
 Use **new chat** for a different subject. The previous chat stays in the **saved chats** sidebar, titled from its first task. Select an older chat to restore its project, messages, and each agent's native session. Chats save automatically on this computer and survive app restarts. Each chat keeps up to 500 recent events; the native agents manage their full session history. Switching collaboration modes in the same project retains agent context.
 
-Chat switching and starting a new subject are disabled during a running task. When work is idle, the composer shows a **start a new chat** shortcut. Unsent drafts stay with their chat while the app remains open. Old activity from version 0.1.1 is migrated into a saved chat; native session IDs cannot be recovered retroactively for that old activity.
+Chat switching and starting a new subject are disabled during a running task. When work is idle, the composer shows a **start a new chat** shortcut. Unsent drafts stay with their chat and return after restarting. Old activity from version 0.1.1 is migrated into a saved chat; native session IDs cannot be recovered retroactively for that old activity.
 
 ## Customize the interface
 
@@ -104,6 +108,7 @@ Chat activity can contain source code and prompts. The app stores chats, native 
 npm test
 npm run build
 npm run test:desktop
+npm run test:chats
 ```
 
 `test:desktop` uses an isolated profile and generated MotionKit/Git fixtures; it

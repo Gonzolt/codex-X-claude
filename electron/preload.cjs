@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld('desktop', {
   approvalMode: mode => ipcRenderer.invoke('agents:approvalMode', mode),
   openInputUrl: id => ipcRenderer.invoke('agents:inputUrl', id),
   selectChat: id => ipcRenderer.invoke('workspace:chat', id),
+  setDraft: (id, value) => ipcRenderer.invoke('workspace:draft', id, value),
   signIn: agent => ipcRenderer.invoke('agents:signin', agent),
   fresh: () => ipcRenderer.invoke('workspace:fresh'),
   changes: () => ipcRenderer.invoke('workspace:changes'),

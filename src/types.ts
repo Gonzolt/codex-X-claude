@@ -7,7 +7,7 @@ export type InputField = { type?: string; title?: string; description?: string; 
 export type Approval = { id: string; agent: Agent; title: string; detail: string; kind: 'permission' | 'form' | 'url'; url?: string; schema?: { properties?: Record<string, InputField>; required?: string[] } };
 export type Chat = { id: string; title: string; project: string | null; updatedAt: number; messageCount: number };
 export type Workspace = {
-  project: string | null; events: Activity[]; appearance: Appearance;
+  project: string | null; events: Activity[]; draft: string; appearance: Appearance;
   agents: Record<Agent, Connection>; status: Record<Agent, Status>; busy: boolean; approvals: Approval[];
   activeChatId: string; chats: Chat[]; approvalMode: 'ask' | 'auto'; reviewPass: number; reviewLimit: number;
   activity: Record<Agent, { kind: string; text: string } | null>;
@@ -29,6 +29,7 @@ export type Desktop = {
   approvalMode(mode: 'ask' | 'auto'): Promise<Result>;
   openInputUrl(id: string): Promise<Result>;
   selectChat(id: string): Promise<Result<Workspace>>;
+  setDraft(id: string, value: string): Promise<Result>;
   signIn(agent: Agent): Promise<Result<string>>;
   fresh(): Promise<Result<Workspace>>;
   changes(): Promise<Result<Changes>>;
