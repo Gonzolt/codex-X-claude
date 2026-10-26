@@ -55,7 +55,7 @@ async function main() {
   const blocked = () => js('document.getElementById("edit-blocked")?.textContent || ""');
   const sendable = () => js('Boolean(document.querySelector(".editing-prompt-form [type=submit]:not(:disabled)"))');
   await tab('editing');
-  if (await js('Boolean(document.getElementById("edit-prompt"))')) { assert.match(await blocked(), /MotionKit folder/); assert.equal(await sendable(), false); }
+  if (await js('Boolean(document.getElementById("edit-prompt"))')) { assert.match(await blocked(), /Get MotionKit/); assert.equal(await sendable(), false); }
   await ipc('chooseStudio', 'editing'); await pause(150);
   await waitFor(() => js('Boolean(document.getElementById("edit-prompt"))'));
   await type(''); await pause(50);

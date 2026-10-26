@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { ReactNode } from 'react';
-import { ArrowRight, ArrowUpRight, Check, Clapperboard, ExternalLink, Film, FolderOpen, Play, RefreshCw, Sparkles, Square, Video } from 'lucide-react';
+import { ArrowRight, ArrowUpRight, Check, Clapperboard, Download, ExternalLink, Film, FolderOpen, Play, RefreshCw, Sparkles, Square, Video } from 'lucide-react';
 import type { Desktop, Result, StudioKind, Studios, VideoInput } from './types';
 import './studios.css';
 
@@ -25,6 +25,13 @@ export function StudioPage({ kind, state, desktop, report, update, input, setInp
     if (next) { update(next); setSelected(''); }
     setPending(false);
   }
+  async function install() {
+    setPending(true);
+    const next = await perform(desktop.installMotionKit());
+    if (next) { update(next); setSelected(''); }
+    setPending(false);
+  }
+  const installing = editing && !!state.editing.installing;
   async function generate() {
     if (pending || running) return;
     setPending(true); const next = await perform(desktop.runFaceless(input));
@@ -35,8 +42,11 @@ export function StudioPage({ kind, state, desktop, report, update, input, setInp
       <div className="studio-title-row"><div><h1>{editing ? 'motionkit' : 'faceless'}<span>.</span></h1><p>{editing ? 'make things move. on your own terms.' : 'one topic. a whole little film.'}</p></div><span className="studio-stamp">{editing ? <Clapperboard size={24} /> : <Video size={24} />}</span></div>
     </header>
     <div className="studio-scroll">
-      <section className="studio-location"><div className="studio-location-label"><FolderOpen size={17} /><div><b>{editing ? 'your MotionKit project' : 'your video workflow'}</b><span title={root || undefined}>{root || (editing ? 'Connect your standalone MotionKit folder.' : 'Choose the folder with 03_AUTOMATIC_VIDEO.cmd.')}</span></div></div>
-        <button className="bevel-button" disabled={pending || (editing ? editorBusy : running)} onClick={choose}><FolderOpen size={13} />{pending ? 'opening…' : root ? 'change folder' : 'choose folder'}</button>
+      <section className="studio-location"><div className="studio-location-label"><FolderOpen size={17} /><div><b>{editing ? 'your MotionKit project' : 'your video workflow'}</b><span title={root || undefined}>{root || (installing ? 'Downloading MotionKit from GitHub…' : editing ? 'MotionKit is not on this computer yet. Get it, or choose a checkout you already have.' : 'Choose the folder with 03_AUTOMATIC_VIDEO.cmd.')}</span></div></div>
+        <div className="studio-location-actions">
+          {editing && !root && <button className="bevel-button studio-primary" disabled={pending || installing || editorBusy} onClick={install}>{installing ? <RefreshCw size={13} className="spin" /> : <Download size={13} />}{installing ? 'downloading…' : 'get MotionKit'}</button>}
+          <button className="bevel-button" disabled={pending || installing || (editing ? editorBusy : running)} onClick={choose}><FolderOpen size={13} />{pending && !installing ? 'opening…' : root ? 'change folder' : 'choose folder'}</button>
+        </div>
       </section>
       {editing ? <>
         <div className="motion-edit-layout">

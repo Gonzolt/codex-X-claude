@@ -17,7 +17,7 @@ export type Changes = { files: { path: string; status: string }[]; isGit: boolea
 export type Result<T = void> = { ok: true; value: T } | { ok: false; error: string };
 export type StudioKind = 'editing' | 'faceless';
 export type VideoJob = { status: 'idle' | 'running' | 'done' | 'stopped' | 'error'; stage: string; logs: string[]; video: string | null };
-export type Studios = { editing: { root: string | null; films: { id: string; name: string; brand: string }[] }; faceless: { root: string | null; job: VideoJob } };
+export type Studios = { editing: { root: string | null; films: { id: string; name: string; brand: string }[]; installing?: boolean }; faceless: { root: string | null; job: VideoJob } };
 export type VideoInput = { topic: string; genre: 'reflection' | 'fiction' | 'factual'; scenes: number; notes: string };
 export type EditInput = { prompt: string; target: Agent | 'both'; film: string | null };
 export type Desktop = {
@@ -50,6 +50,7 @@ export type Desktop = {
   refreshFilms(): Promise<Result<Studios>>;
   subscribeEditor(callback: (state: Workspace) => void): () => void;
   chooseStudio(kind: StudioKind): Promise<Result<Studios>>;
+  installMotionKit(): Promise<Result<Studios>>;
   previewMotion(id: string): Promise<Result>;
   openStudio(kind: StudioKind, target: 'root' | 'video' | 'output'): Promise<Result>;
   runFaceless(input: VideoInput): Promise<Result<Studios>>;

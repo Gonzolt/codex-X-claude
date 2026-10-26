@@ -95,3 +95,64 @@ test('completed video and credits are available only after READY_FOR_REVIEW', as
   await assert.rejects(studios.outputPath('video'), /has not finished/);
   assert.deepEqual(studios.serialize(), { editing: null, faceless: root });
 });
+async function motionkit(root) {
+  await fs.mkdir(path.join(root, 'brands/lab/films'), { recursive: true });
+  await fs.writeFile(path.join(root, 'package.json'), JSON.stringify({ name: 'motionkit' }));
+  await fs.writeFile(path.join(root, 'brands/lab/films/demo.html'), '<h1>fixture</h1>');
+}
+function gitFixture(handler) {
+  const calls = [];
+  const execFile = (exe, args, options, done) => { calls.push({ exe, args, cwd: options.cwd, env: options.env }); Promise.resolve(handler(args, options)).then(out => done(null, out || '', ''), error => done(error, '', error.stderr || '')); };
+  return { calls, studios: new Studios({}, { execFile }) };
+}
+test('MotionKit connects to the first real checkout without asking', async t => {
+  const root = await folder(t), wrong = path.join(root, 'wrong'), found = path.join(root, 'found');
+  await fs.mkdir(wrong); await motionkit(found);
+  const { studios, calls } = gitFixture(() => ''); t.after(() => studios.close());
+  studios.useMotionKit({ repo: 'https://github.com/o/motionkit.git', managed: path.join(root, 'managed'), candidates: [path.join(root, 'missing'), wrong, found] });
+  await studios.connectMotionKit();
+  assert.equal(studios.state.editing.root, await fs.realpath(found));
+  assert.deepEqual(studios.state.editing.films.map(film => film.id), ['lab/demo']);
+  assert.equal(calls.length, 0, 'a checkout the user owns is never pulled');
+});
+test('a chosen MotionKit folder wins over discovered ones', async t => {
+  const root = await folder(t), chosen = path.join(root, 'chosen'), other = path.join(root, 'other');
+  await motionkit(chosen); await motionkit(other);
+  const studios = new Studios({ editing: chosen }); t.after(() => studios.close());
+  studios.useMotionKit({ repo: 'r', managed: path.join(root, 'managed'), candidates: [other] });
+  await studios.initialize(); await studios.connectMotionKit();
+  assert.equal(studios.state.editing.root, await fs.realpath(chosen));
+});
+test('get MotionKit clones the repository into the managed folder and connects it', async t => {
+  const root = await folder(t), managed = path.join(root, 'data/motionkit');
+  const { studios, calls } = gitFixture(async args => { if (args[0] === 'clone') await motionkit(args.at(-1)); }); t.after(() => studios.close());
+  studios.useMotionKit({ repo: 'https://github.com/o/motionkit.git', managed, candidates: [] });
+  const seen = []; studios.on('state', state => seen.push(!!state.editing.installing));
+  await studios.installMotionKit();
+  assert.deepEqual(calls[0].args, ['clone', '--quiet', 'https://github.com/o/motionkit.git', managed]);
+  assert.equal(calls[0].env.GIT_TERMINAL_PROMPT, '0');
+  assert.equal(studios.state.editing.root, await fs.realpath(managed));
+  assert.equal(studios.state.editing.installing, false);
+  assert.ok(seen.includes(true));
+  await studios.installMotionKit(); assert.equal(calls.length, 1, 'an existing clone is reused');
+});
+test('MotionKit download failures explain what to do', async t => {
+  const root = await folder(t);
+  const denied = gitFixture(() => { throw Object.assign(new Error('exit 128'), { stderr: 'remote: Repository not found.' }); });
+  denied.studios.useMotionKit({ repo: 'https://github.com/o/motionkit.git', managed: path.join(root, 'a'), candidates: [] });
+  await assert.rejects(denied.studios.installMotionKit(), /GitHub did not allow access to o\/motionkit/);
+  assert.equal(denied.studios.state.editing.installing, false);
+  const missing = gitFixture(() => { throw Object.assign(new Error('spawn git ENOENT'), { code: 'ENOENT' }); });
+  missing.studios.useMotionKit({ repo: 'https://github.com/o/motionkit.git', managed: path.join(root, 'b'), candidates: [] });
+  await assert.rejects(missing.studios.installMotionKit(), /Install Git/);
+});
+test('the managed MotionKit pulls only when it has no local edits', async t => {
+  const root = await folder(t), managed = path.join(root, 'motionkit'); await motionkit(managed);
+  let dirty = ' M brands/lab/films/demo.html';
+  const { studios, calls } = gitFixture(args => args[0] === 'status' ? dirty : ''); t.after(() => studios.close());
+  studios.useMotionKit({ repo: 'r', managed, candidates: [] }); await studios.configure('editing', managed);
+  await studios.updateMotionKit();
+  assert.deepEqual(calls.map(call => call.args[0]), ['status']);
+  dirty = ''; await studios.updateMotionKit();
+  assert.deepEqual(calls.map(call => call.args[0]), ['status', 'status', 'pull']);
+});

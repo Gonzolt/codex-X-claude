@@ -34,6 +34,7 @@ contextBridge.exposeInMainWorld('desktop', {
     return () => ipcRenderer.removeListener('editing:update', listener);
   },
   chooseStudio: kind => ipcRenderer.invoke('studios:choose', kind),
+  installMotionKit: () => ipcRenderer.invoke('studios:install'),
   previewMotion: id => ipcRenderer.invoke('studios:preview', id),
   openStudio: (kind, target) => ipcRenderer.invoke('studios:open', kind, target),
   runFaceless: input => ipcRenderer.invoke('studios:run', input),

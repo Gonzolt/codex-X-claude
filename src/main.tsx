@@ -36,7 +36,7 @@ function browserBridge(): Desktop {
     startEdit: unavailable, stopEdit: unavailable, freshEdit: unavailable, selectEditChat: unavailable,
     setEditDraft: unavailable, editApprovalMode: unavailable, approveEdit: unavailable, editInputUrl: unavailable,
     refreshFilms: unavailable, subscribeEditor: () => () => {},
-    chooseStudio: unavailable, previewMotion: unavailable, openStudio: unavailable,
+    chooseStudio: unavailable, installMotionKit: unavailable, previewMotion: unavailable, openStudio: unavailable,
     runFaceless: unavailable, stopFaceless: unavailable, subscribeStudios: () => () => {},
     subscribe: fn => { listeners.add(fn); return () => { listeners.delete(fn); }; }
   };

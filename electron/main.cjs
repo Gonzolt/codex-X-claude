@@ -118,6 +118,15 @@ function registerHandlers() {
       return studios.state;
     } finally { if (kind === 'editing') editingChoosing = false; }
   });
+  handle('studios:install', async () => {
+    if (editor.state.busy || editingChoosing) throw new Error('Finish or stop the edit before changing MotionKit folders.');
+    editingChoosing = true;
+    try {
+      await captureDraft(); await studios.installMotionKit();
+      editor.attach(studios.state.editing.root);
+      return studios.state;
+    } finally { editingChoosing = false; }
+  });
   handle('studios:films', () => studios.refreshFilms());
   handle('editing:state', () => editor.state);
   handle('editing:start', input => {
@@ -183,7 +192,12 @@ app.whenReady().then(async () => {
   coordinator = Coordinator.launch(initial);
   editor = new MotionEditor(initial.editor);
   studios = new Studios({ ...initial.studios, faceless: initial.studios?.faceless || process.env.CXC_FACELESS_ROOT || path.resolve(__dirname, '../..') });
-  await studios.initialize();
+  studios.useMotionKit({
+    repo: links.motionkit + '.git', managed: path.join(app.getPath('userData'), 'motionkit'),
+    // A checkout beside this app (motionkit next to codex-X-claude) or MOTIONKIT_DIR. Tests use fixtures only.
+    candidates: headlessTest ? [] : [process.env.MOTIONKIT_DIR, path.resolve(__dirname, '../../motionkit')].filter(Boolean)
+  });
+  await studios.initialize(); await studios.connectMotionKit();
   if (studios.state.editing.root) editor.attach(studios.state.editing.root);
   let initialSaveError;
   await save().catch(error => { initialSaveError = error; });

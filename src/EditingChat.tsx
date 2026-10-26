@@ -14,7 +14,7 @@ export function EditingChat({ workspace, desktop, root, film, prompt, setPrompt,
   useEffect(() => { following.current = true; }, [workspace.activeChatId]);
   const chats = workspace.chats.filter(chat => chat.project === root);
   // Why "make the edit" is off, in the order the user has to fix it; null when it can be pressed.
-  const blocked = !root ? 'Choose your MotionKit folder above to start editing.'
+  const blocked = !root ? 'Get MotionKit or choose its folder above to start editing.'
     : codingBusy ? 'Finish the coding task before sending an edit.'
     : !prompt.trim() ? 'Describe the change above to make the edit.'
     : null;

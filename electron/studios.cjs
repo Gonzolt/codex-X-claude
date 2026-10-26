@@ -10,6 +10,13 @@ const emptyJob = () => ({ status: 'idle', stage: 'Ready when you are.', logs: []
 const inside = (root, candidate) => { const relative = path.relative(root, candidate); return relative !== '..' && !relative.startsWith('..' + path.sep) && !path.isAbsolute(relative); };
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.woff2': 'font/woff2', '.woff': 'font/woff', '.png': 'image/png', '.jpg': 'image/jpeg', '.svg': 'image/svg+xml', '.wav': 'audio/wav', '.mp3': 'audio/mpeg', '.m4a': 'audio/mp4', '.mp4': 'video/mp4', '.json': 'application/json' };
 
+function gitFailure(error, repo) {
+  if (error.code === 'ENOENT') return 'Install Git (git-scm.com), then get MotionKit again.';
+  const name = repo.replace(/^https:\/\/github\.com\//, '').replace(/\.git$/, '');
+  if (/not found|authentication|could not read username|permission denied|403/i.test(error.stderr)) return `GitHub did not allow access to ${name}. Sign in to GitHub with an account that can see it, then try again.`;
+  return 'Could not download MotionKit: ' + (error.stderr.trim().split('\n').pop() || error.message);
+}
+
 async function discoverFilms(root) {
   const films = [], brands = await fs.readdir(path.join(root, 'brands'), { withFileTypes: true });
   for (const brand of brands) if (brand.isDirectory() && /^[\w-]+$/.test(brand.name)) {
@@ -57,6 +64,43 @@ class Studios extends EventEmitter {
     const films = await discoverFilms(root);
     if (this.state.editing.root === root) { this.state.editing.films = films; this.publish(); }
     return this.state;
+  }
+  // MotionKit is found or fetched, not only picked. main.cjs passes { repo, managed, candidates }:
+  // `managed` is the app's own clone, `candidates` are existing checkouts worth trying first.
+  useMotionKit(options) { this.motionkit = options; }
+  async connectMotionKit() {
+    const { managed, candidates = [] } = this.motionkit || {};
+    if (!this.state.editing.root) for (const folder of [...candidates, managed].filter(Boolean)) {
+      try { await this.configure('editing', folder); break; } catch { /* not a MotionKit checkout */ }
+    }
+    // Only the app's own clone follows GitHub; a checkout the user owns is never pulled.
+    if (managed && this.state.editing.root === await fs.realpath(managed).catch(() => null)) this.updateMotionKit().catch(() => {});
+    return this.state;
+  }
+  git(args, cwd) {
+    const run = this.dependencies.execFile || execFile;
+    return new Promise((resolve, reject) => run('git', args, { cwd, windowsHide: true, timeout: 300000, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } },
+      (error, stdout, stderr) => error ? reject(Object.assign(error, { stderr: String(stderr || '') })) : resolve(String(stdout || ''))));
+  }
+  async installMotionKit() {
+    const { managed, repo } = this.motionkit || {};
+    if (!managed || !repo) throw new Error('MotionKit cannot be downloaded here.');
+    if (this.state.editing.installing) throw new Error('MotionKit is already downloading.');
+    this.state.editing = { ...this.state.editing, installing: true }; this.publish();
+    try {
+      if (!(await fs.stat(path.join(managed, 'package.json')).catch(() => null))) {
+        await fs.rm(managed, { recursive: true, force: true }); // what an interrupted clone left behind
+        await fs.mkdir(path.dirname(managed), { recursive: true });
+        await this.git(['clone', '--quiet', repo, managed]).catch(error => { throw new Error(gitFailure(error, repo)); });
+      }
+      return await this.configure('editing', managed);
+    } finally { this.state.editing.installing = false; this.publish(); }
+  }
+  async updateMotionKit() {
+    const root = this.state.editing.root;
+    if (!root || (await this.git(['status', '--porcelain'], root)).trim()) return this.state; // edits in progress stay untouched
+    await this.git(['pull', '--ff-only', '--quiet'], root);
+    return this.refreshFilms();
   }
   async previewFilm(id) {
     const { root, films } = this.state.editing;
